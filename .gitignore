@@ -1,0 +1,25 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# collector
+collector/.cache/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# site
+node_modules/
+.next/
+out/
+.vercel/
+site/test-results/
+site/playwright-report/
+
+# private notes
+notes/
+
+.DS_Store
