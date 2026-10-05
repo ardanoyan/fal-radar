@@ -41,9 +41,15 @@ def tokenize(endpoint_id: str) -> tuple[str, ...]:
     return tuple(t for t in _TOKEN_SPLIT.split(endpoint_id.lower()) if t)
 
 
+# fal's queue URLs append /requests/<id>/status and the like to the endpoint ID.
+# Only that suffix is cut: /stream and /realtime are parts of real endpoint IDs
+# (fal-ai/speech-to-text/stream, xai/grok-voice/realtime).
+_URL_SUFFIX = re.compile(r"/requests(?:/.*)?$")
+
+
 def clean_id(raw: str) -> str:
-    """Trim what a regex over source text tends to drag along (a final dot, slash, dash)."""
-    return raw.rstrip(_TRAILING)
+    """Trim what a regex over source text tends to drag along: URL suffixes, a final dot."""
+    return _URL_SUFFIX.sub("", raw.rstrip(_TRAILING)).rstrip(_TRAILING)
 
 
 @dataclass(frozen=True)

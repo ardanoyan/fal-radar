@@ -49,7 +49,20 @@ def test_extract_ids_skips_npm_scopes_and_github_paths():
     assert extract_fal_ai_ids(text) == [
         "fal-ai/flux/dev",
         "fal-ai/veo3",
-        "fal-ai/fast-sdxl/requests",
+        "fal-ai/fast-sdxl",
+    ]
+
+
+def test_extract_ids_cuts_queue_urls_but_keeps_stream_endpoints():
+    text = (
+        "https://queue.fal.run/fal-ai/flux/requests/7f3a-11/status "
+        "https://fal.run/fal-ai/speech-to-text/stream wss://fal.run/xai/grok-voice/realtime "
+        "https://fal.run/fal-ai/flux-lora/stream"
+    )
+    assert extract_fal_ai_ids(text) == [
+        "fal-ai/flux",
+        "fal-ai/speech-to-text/stream",
+        "fal-ai/flux-lora/stream",
     ]
 
 
