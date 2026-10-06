@@ -78,10 +78,24 @@ class Context:
     run: dict[str, Any]
     queries_run: set[str]
     catalogue: dict[str, Any]
+    # Set when a cached-only rebuild left part of the repos without a lookup: counts over
+    # all repos come from here, and figures that need stars or dates use the looked-up part.
+    discovery: dict[str, Any] | None = None
 
     @property
     def date_str(self) -> str:
         return self.data_date.isoformat()
+
+    @property
+    def total(self) -> int:
+        return self.discovery["headline"] if self.discovery else len(self.headline)
+
+    @property
+    def scope(self) -> str:
+        """How to name the repos a figure is computed over."""
+        if self.discovery:
+            return f"of the {n(len(self.headline))} repos looked up so far"
+        return f"of the {n(len(self.headline))} repos"
 
 
 def latest_full_run(paths: config.Paths) -> dict[str, Any]:
@@ -102,6 +116,12 @@ def load_context(paths: config.Paths = config.DEFAULT_PATHS) -> Context:
     seen = [d for r in repos if (d := parse_date(r.last_seen))]
     data_date = parse_date(run.get("run_id")) or max(seen)
     queries_run = {q["id"] for q in (run.get("coverage") or run.get("queries") or [])}
+    disc_path = paths.data / "discovery.json"
+    discovery = None
+    if disc_path.exists():
+        d = json.loads(disc_path.read_text(encoding="utf-8"))
+        if d.get("run_id") == run.get("run_id") and not d.get("lookups_complete"):
+            discovery = d
     catalogue_path = paths.data / "fal_catalogue.json"
     catalogue = (
         json.loads(catalogue_path.read_text(encoding="utf-8")) if catalogue_path.exists() else {}
@@ -114,6 +134,7 @@ def load_context(paths: config.Paths = config.DEFAULT_PATHS) -> Context:
         run=run,
         queries_run=queries_run,
         catalogue=catalogue,
+        discovery=discovery,
     )
 
 
@@ -131,6 +152,23 @@ def finding_clients(ctx: Context) -> dict | None:
         {"js-client"} <= ctx.queries_run and {"py-import", "py-requirements"} & ctx.queries_run
     ):
         return None
+    if ctx.discovery:
+        d = ctx.discovery
+        total, js, py = d["headline"], d["clients"].get("js", 0), d["clients"].get("python", 0)
+        http = d["clients"].get("http", 0)
+        lead, lead_n, other, other_n = (
+            ("JavaScript", js, "Python", py) if js >= py else ("Python", py, "JavaScript", js)
+        )
+        return {
+            "id": "clients",
+            "text": f"{lead} leads {other}: {n(lead_n)} of the {n(total)} repos "
+            f"({pct(lead_n, total)}) use fal's {lead} client against {n(other_n)} "
+            f"({pct(other_n, total)}) for {other}, and {n(http)} ({pct(http, total)}) call "
+            "fal's HTTP API directly.",
+            "numbers": {"repos": total, "js": js, "python": py, "http": http},
+            "query": "every repo the code searches found (not forks, not fal's own); "
+            "client from the search that matched; a repo can have several",
+        }
     total = len(ctx.headline)
     js = sum(1 for r in ctx.headline if "js" in r.clients)
     py = sum(1 for r in ctx.headline if "python" in r.clients)
@@ -152,6 +190,25 @@ def finding_clients(ctx: Context) -> dict | None:
 
 def finding_models(ctx: Context) -> dict | None:
     """The top three model families and their share of repos where a model was seen."""
+    if ctx.discovery:
+        d = ctx.discovery
+        top = sorted(d["families"].items(), key=lambda x: (-x[1], x[0]))[:3]
+        if len(top) < 3:
+            return None
+        index = default_index()
+        names = [index.by_id[f].name if f in index.by_id else f for f, _ in top]
+        return {
+            "id": "models",
+            "text": f"{names[0]}, {names[1]} and {names[2]} lead the models seen in code: "
+            f"{n(top[0][1])}, {n(top[1][1])} and {n(top[2][1])} of the "
+            f"{n(d['repos_with_model'])} repos with a fal model ID in their code.",
+            "numbers": {
+                "repos_with_model": d["repos_with_model"],
+                "top": [{"family": f, "repos": c} for f, c in top],
+            },
+            "query": "every repo the code searches found with a fal model ID in a code "
+            "fragment; model searches sampled at 300 files per family, so a lower bound",
+        }
     with_model = [r for r in ctx.headline if r.models]
     counts = Counter(f for r in with_model for f in r.models)
     if len(counts) < 3 or len(with_model) < 10:
@@ -187,7 +244,7 @@ def finding_recent(ctx: Context) -> dict | None:
         return None
     return {
         "id": "recent",
-        "text": f"{n(len(recent))} of the {n(total)} repos ({pct(len(recent), total)}) were "
+        "text": f"{n(len(recent))} {ctx.scope} ({pct(len(recent), total)}) were "
         f"created in the {RECENT_DAYS} days before {ctx.date_str}.",
         "numbers": {"repos": total, "created_last_30_days": len(recent)},
         "query": f"headline repos with created_at within {RECENT_DAYS} days of the data date",
@@ -202,7 +259,7 @@ def finding_big(ctx: Context) -> dict | None:
     top = big[0]
     return {
         "id": "stars",
-        "text": f"{n(len(big))} repos ({pct(len(big), total)}) have {BIG_STARS} or more "
+        "text": f"{n(len(big))} {ctx.scope} ({pct(len(big), total)}) have {BIG_STARS} or more "
         f"stars; the largest, {top.full_name}, has {n(top.stars)}.",
         "numbers": {
             "repos": total,
@@ -223,7 +280,7 @@ def finding_active(ctx: Context) -> dict | None:
     )
     return {
         "id": "active",
-        "text": f"{n(active)} of the {n(total)} repos ({pct(active, total)}) were pushed to "
+        "text": f"{n(active)} {ctx.scope} ({pct(active, total)}) were pushed to "
         f"in the {ACTIVE_DAYS} days before {ctx.date_str}.",
         "numbers": {"repos": total, "pushed_last_90_days": active},
         "query": f"headline repos with pushed_at within {ACTIVE_DAYS} days of the data date",
@@ -415,8 +472,12 @@ def site_summary(ctx: Context) -> dict:
         "partial": bool(ctx.run.get("partial")) or not coverage,
         "queries_run": sorted(ctx.queries_run),
         "queries_total": len(ALL_QUERIES),
-        "headline": len(h),
-        "builders": len({r.owner.login.lower() for r in h}),
+        "headline": ctx.total,
+        "builders": ctx.discovery["headline_builders"]
+        if ctx.discovery
+        else len({r.owner.login.lower() for r in h}),
+        "detailed": len(h),
+        "lookups_complete": ctx.discovery is None,
         "notable": sum(1 for r in h if r.notable),
         "active": sum(1 for r in h if r.active),
         "mentions": sum(1 for m in mentions.values() if not m.owner_is_fal),
@@ -437,6 +498,12 @@ def families(ctx: Context) -> dict:
     snap_path = ctx.paths.snapshots / f"{ctx.run.get('run_id')}.json"
     snap = json.loads(snap_path.read_text(encoding="utf-8")) if snap_path.exists() else {}
     files = snap.get("families", {})
+    if ctx.discovery:
+        repos = Counter(ctx.discovery["families"])
+        files = {
+            k: {"files": v, "files_sampled": v > 300}
+            for k, v in ctx.discovery["family_files"].items()
+        }
     rows = []
     for fam in index.families:
         if not (fam.discover or repos.get(fam.id)):
@@ -455,8 +522,10 @@ def families(ctx: Context) -> dict:
     rows.sort(key=lambda r: (-r["repos"], -(r["files"] or 0), r["name"].lower()))
     return {
         "data_date": ctx.date_str,
-        "repos_with_model": sum(1 for r in ctx.headline if r.models),
-        "repos": len(ctx.headline),
+        "repos_with_model": ctx.discovery["repos_with_model"]
+        if ctx.discovery
+        else sum(1 for r in ctx.headline if r.models),
+        "repos": ctx.total,
         "families": rows,
     }
 

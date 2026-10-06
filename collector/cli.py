@@ -55,6 +55,13 @@ def run(
             help="Rebuild an earlier run (YYYY-MM-DD) from its cache, fetching what is missing.",
         ),
     ] = None,
+    cached_only: Annotated[
+        bool,
+        typer.Option(
+            "--cached-only",
+            help="Rebuild --run-id from its cache alone; repos not looked up count from hits.",
+        ),
+    ] = False,
 ) -> None:
     """Discover, enrich and write data/. The token comes from GH_SEARCH_TOKEN, never a flag."""
     options = pipeline.RunOptions(
@@ -67,6 +74,7 @@ def run(
         skip_scoped=skip_scoped,
         limit_repos=limit_repos,
         run_id=run_id,
+        cached_only=cached_only,
     )
     try:
         summary = pipeline.run(config.DEFAULT_PATHS, options, log=typer.echo)

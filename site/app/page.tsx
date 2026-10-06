@@ -47,6 +47,7 @@ export default function Home() {
   const fams = families();
   const names = familyNames();
   const partial = s.queries_run.length < s.queries_total;
+  const subset = s.lookups_complete ? "" : ` Among the ${fmt(s.detailed)} repos looked up so far.`;
   const clients = Object.entries(CLIENT_LABELS)
     .filter(([id]) => l.rows.some((r) => r.c.includes(id)))
     .map(([id, label]) => ({ id, label }));
@@ -69,6 +70,12 @@ export default function Home() {
             <>
               {" "}
               · from {fmt(s.queries_run.length)} of {fmt(s.queries_total)} searches; the full run is in progress
+            </>
+          ) : null}
+          {!partial && !s.lookups_complete ? (
+            <>
+              {" "}
+              · all {fmt(s.queries_total)} searches; stars and dates so far for {fmt(s.detailed)} of these repos
             </>
           ) : null}
         </p>
@@ -102,7 +109,7 @@ export default function Home() {
         <h2 id="builders">Builders to know</h2>
         <p className="section-note">
           {fmt(b.builders.length)} builders with a repo of 20 or more stars pushed in the last 90 days, by the
-          stars of their best fal repo. Not fal, no forks, no templates.
+          stars of their best fal repo. Not fal, no forks, no templates.{subset}
         </p>
         <ol className="rows">
           {b.builders.map((x, i) => (
@@ -146,10 +153,12 @@ export default function Home() {
           <h3>
             New <span className="count">{fmt(w.new.count)}</span>
           </h3>
-          <p className="section-note">Repos with fal in the code, created in the last {w.new.days} days.</p>
+          <p className="section-note">
+            Repos with fal in the code, created in the last {w.new.days} days.{subset}
+          </p>
           <RepoRows repos={w.new.repos.slice(0, 5)} names={names} />
           <h3>Most starred</h3>
-          <p className="section-note">Created in the last {w.most_starred.days} days.</p>
+          <p className="section-note">Created in the last {w.most_starred.days} days.{subset}</p>
           <RepoRows repos={w.most_starred.repos} names={names} />
           <h3>
             Models this week <span className="count">{fmt(w.models.count)}</span>
@@ -172,7 +181,13 @@ export default function Home() {
       </section>
 
       <section className="section" aria-labelledby="all">
-        <h2 id="all">All repos</h2>
+        <h2 id="all">{s.lookups_complete ? "All repos" : "Repos looked up so far"}</h2>
+        {!s.lookups_complete ? (
+          <p className="section-note">
+            {fmt(s.detailed)} of the {fmt(s.headline)} repos, with stars and dates. The rest are counted in the
+            headline from their search hits.
+          </p>
+        ) : null}
         <RepoList
           initial={l.rows.slice(0, 50)}
           total={l.count}

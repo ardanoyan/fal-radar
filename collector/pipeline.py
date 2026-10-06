@@ -29,7 +29,7 @@ import httpx
 
 from . import __version__, classify, config, manifests, runlog, store
 from .cache import DiskCache
-from .enrich import fetch_file, fetch_owners, fetch_readme_size, fetch_repos
+from .enrich import RepoFacts, fetch_file, fetch_owners, fetch_readme_size, fetch_repos
 from .github import AuthError, GitHubClient, GitHubError, RateLimitGiveUp
 from .models import default_index, extract_fal_ai_ids, extract_partner_ids
 from .queries import (
@@ -78,6 +78,9 @@ class RunOptions:
     limit_repos: int | None = None
     # Rebuild an earlier run from its cache (only what is missing is fetched).
     run_id: str | None = None
+    # Rebuild from the cache only: no network; repos never looked up are counted from
+    # their search hits (data/discovery.json) but get no record in repos.json.
+    cached_only: bool = False
 
 
 @dataclass
@@ -90,6 +93,8 @@ class _Hit:
     fragments: list[str] = field(default_factory=list)
     manifest_paths: list[str] = field(default_factory=list)
     files: int = 0
+    owner: str = ""
+    fork: bool = False
 
 
 @dataclass
@@ -169,6 +174,17 @@ def run(
     log: Callable[[str], None] = print,
     run_date: str | None = None,
 ) -> dict[str, Any]:
+    if options.cached_only:
+        options = RunOptions(
+            only=options.only,
+            run_id=options.run_id,
+            cached_only=True,
+            offline=True,
+            skip_owners=True,
+            skip_manifests=True,
+            skip_readmes=True,
+            skip_scoped=True,
+        )
     queries = select_queries(options.only)
     limited = is_limited(options)
 
@@ -232,7 +248,7 @@ def run(
     journal.event("run_finished", totals=summary["totals"], seconds=summary["seconds"])
     # A limited run (--only, --limit-repos, a skipped stage) never replaces the full
     # run's summary.
-    name = f"{run_id}.limited.json" if limited else f"{run_id}.json"
+    name = f"{run_id}.limited.json" if limited and not options.cached_only else f"{run_id}.json"
     store.write_json_atomic(paths.runs / name, summary)
     return summary
 
@@ -351,7 +367,15 @@ class _Run:
             repo = item["repository"]
             rid = int(repo["id"])
             counted.add(rid)
-            hit = self.hits.setdefault(rid, _Hit(rid, repo["full_name"]))
+            hit = self.hits.setdefault(
+                rid,
+                _Hit(
+                    rid,
+                    repo["full_name"],
+                    owner=(repo.get("owner") or {}).get("login") or repo["full_name"].split("/")[0],
+                    fork=bool(repo.get("fork")),
+                ),
+            )
             hit.files += 1
             if doc:
                 # A fal string in documentation is a mention, not code.
@@ -744,8 +768,11 @@ class _Run:
             self.client,
             [wanted[rid] for rid in order],
             conditional={r.full_name for r in self.previous.values()},
+            tolerate_missing=self.options.cached_only,
             log=self.log,
         )
+        for name in enrich_report.missing:
+            facts.setdefault(name, RepoFacts(name, 0, None))
 
         signals = self.read_manifests(facts, order, wanted)
 
@@ -935,6 +962,8 @@ class _Run:
             {k: v for k, v in self.unsearchable.items() if not self.excluded(k)},
         )
         store.save_etags(self.paths.etags, self.etags_to_keep(repos))
+        discovery = self.discovery(built, enrich_report)
+        store.write_json_atomic(self.paths.data / "discovery.json", discovery)
         snapshot = self.snapshot(repos, mentions)
         limited = is_limited(self.options)
         if not limited:
@@ -950,6 +979,52 @@ class _Run:
             promoted_count,
             len(profiles),
         )
+
+    def discovery(self, built: dict[int, Repo], enrich_report) -> dict[str, Any]:
+        """Counts over every repo the searches found with fal in the code, looked up or not.
+
+        A cached-only rebuild has records (stars, dates) for part of them; these counts need
+        only the search hits: owner, fork flag, which client and which models.
+        """
+        code = [
+            h for h in self.hits.values() if "code" in h.tiers and not self.excluded(h.full_name)
+        ]
+        head = [h for h in code if not h.fork and not is_fal_owner(h.owner)]
+        fams: dict[int, set[str]] = {}
+        for h in head:
+            found: set[str] = set()
+            for fragment in h.fragments:
+                for eid in [*extract_fal_ai_ids(fragment), *extract_partner_ids(fragment)]:
+                    fam = self.index.match(eid)
+                    if fam:
+                        found.add(fam)
+            fams[h.repo_id] = found
+        with_model = [h for h in head if fams[h.repo_id]]
+        family_files = {
+            r.id.removeprefix("model-"): r.total_count
+            for r in self.reports
+            if r.id.startswith("model-")
+        }
+        detailed = sum(
+            1 for h in head if h.repo_id in built and built[h.repo_id].evidence == "code"
+        )
+        return {
+            "run_id": self.run_id,
+            "lookups_complete": not enrich_report.missing,
+            "code_tier": len(code),
+            "headline": len(head),
+            "headline_builders": len({h.owner.lower() for h in head}),
+            "from_fal": sum(1 for h in code if is_fal_owner(h.owner)),
+            "forks": sum(1 for h in code if h.fork),
+            "detailed": detailed,
+            "not_looked_up": len(enrich_report.missing),
+            "clients": dict(sorted(Counter(c for h in head for c in h.clients).items())),
+            "repos_with_model": len(with_model),
+            "families": dict(sorted(Counter(f for h in head for f in fams[h.repo_id]).items())),
+            "family_files": dict(sorted(family_files.items())),
+            "note": "Counts from search hits; template copies need a lookup to detect and "
+            "are only excluded among looked-up repos.",
+        }
 
     def etags_to_keep(self, repos: list[Repo]) -> dict[str, str]:
         """ETags for next week: the code-tier repos and their owners, nothing else.

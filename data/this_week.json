@@ -3,14 +3,18 @@
  "first_issue": true,
  "new": {
   "days": 14,
-  "count": 35,
+  "count": 62,
   "repos": [
    {
     "full_name": "ilkerzg/storycast",
     "url": "https://github.com/ilkerzg/storycast",
     "description": "Type a topic. Get a story.",
     "stars": 229,
-    "models": [],
+    "models": [
+     "elevenlabs",
+     "ffmpeg-api",
+     "workflow-utilities"
+    ],
     "created_at": "2026-09-24",
     "pushed_at": "2026-09-25"
    },
@@ -19,7 +23,9 @@
     "url": "https://github.com/mikhailsychevbytebytego/cattube",
     "description": null,
     "stars": 17,
-    "models": [],
+    "models": [
+     "any-llm"
+    ],
     "created_at": "2026-09-22",
     "pushed_at": "2026-09-26"
    },
@@ -28,9 +34,42 @@
     "url": "https://github.com/Openpod/impractical-video",
     "description": "An open-source canvas for working creating, editing and shipping ai video projects",
     "stars": 3,
-    "models": [],
+    "models": [
+     "elevenlabs",
+     "gpt-image"
+    ],
     "created_at": "2026-09-24",
     "pushed_at": "2026-09-29"
+   },
+   {
+    "full_name": "0xmariowu/MVGP",
+    "url": "https://github.com/0xmariowu/MVGP",
+    "description": "An agent-first film production platform: you chat with an AI agent about the film, the agent writes, orders and accounts for every shot by the book, and you...",
+    "stars": 2,
+    "models": [],
+    "created_at": "2026-09-27",
+    "pushed_at": "2026-09-29"
+   },
+   {
+    "full_name": "AbhirajTiwari12/vrshop",
+    "url": "https://github.com/AbhirajTiwari12/vrshop",
+    "description": null,
+    "stars": 1,
+    "models": [
+     "hyper3d",
+     "trellis"
+    ],
+    "created_at": "2026-09-26",
+    "pushed_at": "2026-09-28"
+   },
+   {
+    "full_name": "AliAbid31/gomycode-hackathon",
+    "url": "https://github.com/AliAbid31/gomycode-hackathon",
+    "description": null,
+    "stars": 1,
+    "models": [],
+    "created_at": "2026-09-27",
+    "pushed_at": "2026-09-27"
    },
    {
     "full_name": "prayushkale/magic-pencil-app",
@@ -42,40 +81,13 @@
     "pushed_at": "2026-10-04"
    },
    {
-    "full_name": "88shokan/FitMe",
-    "url": "https://github.com/88shokan/FitMe",
-    "description": "Cut online apparel returns by showing shoppers an AI try-on of the garment on themselves, plus a size recommendation. Temple Owl Hacks, sustainability track.",
-    "stars": 0,
-    "models": [],
-    "created_at": "2026-09-26",
-    "pushed_at": "2026-09-27"
-   },
-   {
-    "full_name": "akotsampaseris/word-of-the-day",
-    "url": "https://github.com/akotsampaseris/word-of-the-day",
-    "description": "Small project that generates a word of the day graphics and stories.",
-    "stars": 0,
-    "models": [],
-    "created_at": "2026-09-29",
-    "pushed_at": "2026-09-29"
-   },
-   {
-    "full_name": "AndiiCodes/AI-Canva",
-    "url": "https://github.com/AndiiCodes/AI-Canva",
+    "full_name": "24pfilms/OrcaMoveitMod",
+    "url": "https://github.com/24pfilms/OrcaMoveitMod",
     "description": null,
     "stars": 0,
     "models": [],
-    "created_at": "2026-09-28",
-    "pushed_at": "2026-09-29"
-   },
-   {
-    "full_name": "botfusions/botsweb",
-    "url": "https://github.com/botfusions/botsweb",
-    "description": null,
-    "stars": 0,
-    "models": [],
-    "created_at": "2026-09-30",
-    "pushed_at": "2026-09-30"
+    "created_at": "2026-10-03",
+    "pushed_at": "2026-10-03"
    }
   ]
  },
@@ -87,45 +99,57 @@
     "url": "https://github.com/0xsline/OpenChatCut",
     "description": "Open-source, local-first conversational AI video editor with a professional multi-track timeline, Agent Skills, MCP integration, and Remotion rendering.",
     "stars": 2145,
-    "models": [],
+    "models": [
+     "nano-banana",
+     "pixverse",
+     "recraft",
+     "veo"
+    ],
     "created_at": "2026-07-15",
     "pushed_at": "2026-10-05"
+   },
+   {
+    "full_name": "achimala/dream-loop",
+    "url": "https://github.com/achimala/dream-loop",
+    "description": "Agent skill for impressive 3D visuals using Blender + image gen + subagent critic",
+    "stars": 1641,
+    "models": [
+     "trellis"
+    ],
+    "created_at": "2026-09-07",
+    "pushed_at": "2026-09-09"
+   },
+   {
+    "full_name": "autonomous-ai/openharness",
+    "url": "https://github.com/autonomous-ai/openharness",
+    "description": "The ultimate harness for coding agents and beyond. All your agents. All your machines. One command center. Start with code, then follow your curiosity and...",
+    "stars": 1132,
+    "models": [],
+    "created_at": "2026-08-04",
+    "pushed_at": "2026-10-06"
    },
    {
     "full_name": "ItusiAI/Open-Magiviz",
     "url": "https://github.com/ItusiAI/Open-Magiviz",
     "description": "Magiviz：开源的 AI 视频创作引擎，把一整个剧组交给每一个开发者与创作者",
     "stars": 605,
-    "models": [],
+    "models": [
+     "ffmpeg-api"
+    ],
     "created_at": "2026-08-09",
     "pushed_at": "2026-09-04"
    },
    {
-    "full_name": "BuzzPlay/infinite-world",
-    "url": "https://github.com/BuzzPlay/infinite-world",
-    "description": "An open-source system for building persistent worlds with multimodal AI.",
-    "stars": 388,
-    "models": [],
-    "created_at": "2026-09-04",
-    "pushed_at": "2026-09-29"
-   },
-   {
-    "full_name": "blendi-remade/interdimensional-game",
-    "url": "https://github.com/blendi-remade/interdimensional-game",
-    "description": "Create your own adventure with realtime video!",
-    "stars": 250,
-    "models": [],
-    "created_at": "2026-08-31",
-    "pushed_at": "2026-09-04"
-   },
-   {
-    "full_name": "ilkerzg/storycast",
-    "url": "https://github.com/ilkerzg/storycast",
-    "description": "Type a topic. Get a story.",
-    "stars": 229,
-    "models": [],
-    "created_at": "2026-09-24",
-    "pushed_at": "2026-09-25"
+    "full_name": "autonnel/autonnel",
+    "url": "https://github.com/autonnel/autonnel",
+    "description": "The open-source, AI-native upgrade to ClickFunnels, build funnels with checkout, upsells & ad attribution.",
+    "stars": 473,
+    "models": [
+     "flux",
+     "kling"
+    ],
+    "created_at": "2026-07-09",
+    "pushed_at": "2026-08-20"
    }
   ]
  },

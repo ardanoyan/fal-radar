@@ -13,11 +13,11 @@ fal radar finds public GitHub projects built on [fal](https://fal.ai), the gener
 <!-- findings:start -->
 Data date 2026-10-06.
 
-1. 83 of the 2,092 repos (4%) were created in the 30 days before 2026-10-06.
-2. 69 repos (3%) have 100 or more stars; the largest, lobehub/lobehub, has 83,017.
-3. 659 of the 2,092 repos (32%) were pushed to in the 90 days before 2026-10-06.
-4. 1,027 repos (49%) were created in 2026 and 911 (44%) in 2025; only 154 are older.
-5. 1,900 repos (91%) belong to individual developers and 192 (9%) to organisations.
+1. JavaScript leads Python: 2,686 of the 9,103 repos (30%) use fal's JavaScript client against 2,096 (23%) for Python, and 4,389 (48%) call fal's HTTP API directly.
+2. FLUX, Nano Banana and Kling lead the models seen in code: 2,010, 616 and 595 of the 5,182 repos with a fal model ID in their code.
+3. 135 of the 3,006 repos looked up so far (4%) were created in the 30 days before 2026-10-06.
+4. 105 of the 3,006 repos looked up so far (3%) have 100 or more stars; the largest, affaan-m/ECC, has 274,124.
+5. 1,079 of the 3,006 repos looked up so far (36%) were pushed to in the 90 days before 2026-10-06.
 <!-- findings:end -->
 
 ## How it works

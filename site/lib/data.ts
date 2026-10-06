@@ -38,6 +38,8 @@ export const Site = z.object({
   queries_total: z.number(),
   headline: z.number(),
   builders: z.number(),
+  detailed: z.number(),
+  lookups_complete: z.boolean(),
   notable: z.number(),
   active: z.number(),
   mentions: z.number(),

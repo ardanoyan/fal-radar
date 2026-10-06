@@ -69,6 +69,12 @@ def markdown(ctx: Context, week: str, tw: dict, builder: dict | None, summary: d
             "Rising repos and model movers start next week.",
             "",
         ]
+    if summary["partial"]:
+        out += [
+            f"Stars and dates so far cover {n(summary['detailed'])} of the "
+            f"{n(summary['headline'])} repos; the lists below come from those.",
+            "",
+        ]
     out += [f"## New this week (created in the last {tw['new']['days']} days)", ""]
     if tw["new"]["repos"]:
         out += [f"- {_line(r)}" for r in tw["new"]["repos"]]
@@ -103,7 +109,12 @@ def markdown(ctx: Context, week: str, tw: dict, builder: dict | None, summary: d
         "",
         f"- {n(summary['headline'])} public GitHub repos with fal in the code "
         f"(not forks, not fal's own), from {n(summary['builders'])} builders",
-        f"- {n(summary['active'])} pushed in the last 90 days, {n(summary['notable'])} notable",
+        (
+            f"- Of the {n(summary['detailed'])} repos looked up so far: "
+            if summary["partial"]
+            else "- "
+        )
+        + f"{n(summary['active'])} pushed in the last 90 days, {n(summary['notable'])} notable",
         f"- Data date {ctx.date_str}. Counts cover public GitHub repos that our searches "
         "found; private and closed-source work is invisible to this tool.",
         "",
@@ -220,8 +231,12 @@ def write(paths: config.Paths = config.DEFAULT_PATHS, week: str | None = None) -
     builder = _first_builder(ctx)
     h = ctx.headline
     summary = {
-        "headline": len(h),
-        "builders": len({r.owner.login.lower() for r in h}),
+        "headline": ctx.total,
+        "builders": ctx.discovery["headline_builders"]
+        if ctx.discovery
+        else len({r.owner.login.lower() for r in h}),
+        "detailed": len(h),
+        "partial": ctx.discovery is not None,
         "notable": sum(1 for r in h if r.notable),
         "active": sum(1 for r in h if r.active),
     }

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .github import GitHubClient
+from .github import GitHubClient, OfflineMiss
 
 PROGRESS_EVERY = 250
 
@@ -31,6 +31,8 @@ class EnrichReport:
     not_modified: int = 0
     gone: list[str] = field(default_factory=list)
     renamed: dict[str, str] = field(default_factory=dict)
+    # Cached-only rebuilds: repos that were never looked up in this run.
+    missing: list[str] = field(default_factory=list)
 
 
 def fetch_repos(
@@ -38,6 +40,7 @@ def fetch_repos(
     full_names: list[str],
     *,
     conditional: set[str] | None = None,
+    tolerate_missing: bool = False,
     log: Callable[[str], None] = print,
 ) -> tuple[dict[str, RepoFacts], EnrichReport]:
     """Look up each repository once. Keys of the result are the names as requested.
@@ -49,7 +52,13 @@ def fetch_repos(
     report = EnrichReport(requested=len(full_names))
     out: dict[str, RepoFacts] = {}
     for n, name in enumerate(full_names, start=1):
-        resp = client.get(f"/repos/{name}", conditional=name.lower() in conditional)
+        try:
+            resp = client.get(f"/repos/{name}", conditional=name.lower() in conditional)
+        except OfflineMiss:
+            if not tolerate_missing:
+                raise
+            report.missing.append(name)
+            continue
         if resp.status == 200 and isinstance(resp.data, dict):
             report.ok += 1
             actual = resp.data.get("full_name") or name
