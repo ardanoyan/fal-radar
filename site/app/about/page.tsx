@@ -21,12 +21,12 @@ export default function About() {
 
       <section className="section" aria-labelledby="why">
         <h2 id="why">Why I built this</h2>
-        <p className="placeholder">[WHY I BUILT THIS]</p>
+        <p>{`I built fal radar in a week in October 2026 because I wanted to work on fal's community and could not find a map of who actually builds on fal. The only public, structured trace of that community is code, so I mapped the public GitHub repositories that use fal's clients, endpoints and model IDs, and I publish what the data shows, with its limits stated on this page.`}</p>
       </section>
 
       <section className="section" aria-labelledby="fal">
         <h2 id="fal">What I would do with it at fal</h2>
-        <p className="placeholder">[WHAT I WOULD DO WITH IT AT FAL]</p>
+        <p>{"Run it every week and turn it into a habit: a Monday digest for Discord and X, a short list of builders worth talking to, and a loop that carries what builders struggle with back to the engineering team. The radar is a starting point, not the product. The point is that the people building on fal get noticed."}</p>
       </section>
 
       <section className="section" aria-labelledby="method">
