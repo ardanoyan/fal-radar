@@ -1,0 +1,46 @@
+{
+ "date": "2026-10-06",
+ "headline": 2092,
+ "builders": 1868,
+ "notable": 219,
+ "active": 659,
+ "mentions": 0,
+ "from_fal": 10,
+ "clients": {
+  "js": 2092
+ },
+ "kinds": {
+  "app": 2022,
+  "plugin": 4,
+  "research": 1,
+  "template": 65
+ },
+ "stacks": {
+  "comfyui": 2,
+  "expo": 2,
+  "flask": 2,
+  "n8n": 2,
+  "next": 38,
+  "react": 28,
+  "svelte": 3,
+  "vue": 3
+ },
+ "languages": {
+  "TypeScript": 1634,
+  "JavaScript": 282,
+  "HTML": 57,
+  "Python": 51,
+  "Svelte": 14,
+  "Vue": 6,
+  "Astro": 5,
+  "Dart": 5,
+  "MDX": 5,
+  "none": 5,
+  "Shell": 4,
+  "Swift": 3,
+  "PHP": 3,
+  "PowerShell": 2,
+  "Java": 2
+ },
+ "families": {}
+}

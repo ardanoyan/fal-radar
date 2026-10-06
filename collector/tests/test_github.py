@@ -57,9 +57,24 @@ def test_etag_file_is_used_when_the_cache_is_empty(make_client):
         return json_response(304, {})
 
     client, _ = make_client(handler, etags={url: 'W/"from-file"'})
-    resp = client.get("/repos/a/b")
+    resp = client.get("/repos/a/b", conditional=True)
     assert seen["etag"] == 'W/"from-file"'
     assert resp.not_modified and resp.data is None
+
+
+def test_saved_etags_are_not_sent_unless_the_caller_can_handle_a_bodiless_304(make_client):
+    url = "https://api.github.com/repos/a/b"
+    client, rec = make_client(lambda r: json_response(200, {"n": 1}), etags={url: 'W/"x"'})
+    resp = client.get("/repos/a/b")
+    assert "if-none-match" not in rec.requests[0].headers and resp.data == {"n": 1}
+
+
+def test_search_errors_are_not_cached(make_client):
+    answers = [json_response(403, {"message": "Forbidden"}), json_response(200, {"items": []})]
+    client, rec = make_client(lambda r: answers.pop(0))
+    assert client.get("/search/code", {"q": "x"}, bucket="code_search").status == 403
+    assert client.get("/search/code", {"q": "x"}, bucket="code_search").status == 200
+    assert len(rec.requests) == 2
 
 
 def test_search_requests_never_send_if_none_match(make_client):

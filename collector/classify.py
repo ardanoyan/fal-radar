@@ -47,7 +47,24 @@ STACK_TOPIC_ALIASES = {
 
 
 def _has_word(text: str, words: tuple[str, ...]) -> bool:
-    return any(re.search(rf"(?<![a-z0-9]){re.escape(w)}", text) for w in words)
+    """A whole word, plural allowed: "demos" matches demo, "demon" and "demonstrate" do not."""
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(w)}(?:s|es)?(?![a-z0-9])", text) for w in words)
+
+
+_PLUGIN_NOUNS = r"(?:plugin|extension|node|nodes|custom node|add-on|addon|integration)"
+
+
+def _plugin_like(name: str, description: str, topics: list[str]) -> bool:
+    """A plugin for one of PLUGIN_WORDS: named so, tagged so, or described as one.
+
+    "Figma-inspired canvas" or "inspired by ComfyUI" in a description does not count.
+    """
+    if _has_word(name, PLUGIN_WORDS) or any(t.lower() in PLUGIN_WORDS for t in topics):
+        return True
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(w)}[\s-]+{_PLUGIN_NOUNS}(?![a-z0-9])", description)
+        for w in PLUGIN_WORDS
+    )
 
 
 def parse_time(value: str | None) -> dt.datetime | None:
@@ -70,6 +87,7 @@ def kind_of(
     stars: int,
     bot: bool = False,
     library: bool = False,
+    topics: list[str] | None = None,
 ) -> str:
     """One label per repo. bot and library come from its manifest, when one was read."""
     text_name = name.lower()
@@ -78,7 +96,7 @@ def kind_of(
         return "template"
     if fork and stars < FORK_KIND_MAX_STARS:
         return "fork"
-    if _has_word(text_all, PLUGIN_WORDS):
+    if _plugin_like(text_name, (description or "").lower(), topics or []):
         return "plugin"
     if bot:
         return "bot"

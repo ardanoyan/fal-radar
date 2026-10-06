@@ -37,13 +37,19 @@ def fetch_repos(
     client: GitHubClient,
     full_names: list[str],
     *,
+    conditional: set[str] | None = None,
     log: Callable[[str], None] = print,
 ) -> tuple[dict[str, RepoFacts], EnrichReport]:
-    """Look up each repository once. Keys of the result are the names as requested."""
+    """Look up each repository once. Keys of the result are the names as requested.
+
+    Names in `conditional` (repos whose previous record we keep) may be revalidated with
+    a saved ETag; a 304 then comes back without data and the caller keeps its copy.
+    """
+    conditional = {n.lower() for n in (conditional or set())}
     report = EnrichReport(requested=len(full_names))
     out: dict[str, RepoFacts] = {}
     for n, name in enumerate(full_names, start=1):
-        resp = client.get(f"/repos/{name}")
+        resp = client.get(f"/repos/{name}", conditional=name.lower() in conditional)
         if resp.status == 200 and isinstance(resp.data, dict):
             report.ok += 1
             actual = resp.data.get("full_name") or name
@@ -66,12 +72,18 @@ def fetch_owners(
     client: GitHubClient,
     logins: list[str],
     *,
+    conditional: set[str] | None = None,
     log: Callable[[str], None] = print,
 ) -> dict[str, dict[str, Any] | None]:
-    """Public profile per owner login. None when the profile is gone or unchanged without a body."""
+    """Public profile per owner login. None when the profile is gone or unchanged without a body.
+
+    Only logins in `conditional` (owners we already hold a name and location for) are
+    revalidated with a saved ETag.
+    """
+    conditional = {c.lower() for c in (conditional or set())}
     out: dict[str, dict[str, Any] | None] = {}
     for n, login in enumerate(logins, start=1):
-        resp = client.get(f"/users/{login}")
+        resp = client.get(f"/users/{login}", conditional=login.lower() in conditional)
         out[login] = resp.data if resp.status == 200 and isinstance(resp.data, dict) else None
         if n % PROGRESS_EVERY == 0:
             log(f"  owners {n}/{len(logins)}")
@@ -91,7 +103,7 @@ def fetch_file(client: GitHubClient, full_name: str, path: str) -> str | None:
     if data.get("encoding") != "base64" or not data.get("content"):
         return None
     try:
-        return base64.b64decode(data["content"]).decode("utf-8")
+        return base64.b64decode(data["content"]).decode("utf-8-sig")
     except (ValueError, UnicodeDecodeError):
         return None
 

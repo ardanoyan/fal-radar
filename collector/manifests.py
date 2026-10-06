@@ -73,6 +73,10 @@ BOT_DEPS = {
 }
 
 _REQ_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+# Bigger manifests are skipped: real ones are small, and parsing untrusted text has limits.
+MAX_MANIFEST_CHARS = 256_000
+# Scripts that mark a package.json as something you run, not something you import.
+RUN_SCRIPTS = {"start", "dev", "serve"}
 
 
 @dataclass
@@ -97,6 +101,8 @@ class ManifestSignals:
 
     @property
     def bot(self) -> bool:
+        if self.kind in ("requirements.txt", "pyproject.toml"):
+            return bool(self.deps & PY_BOT_DEPS)
         return bool(self.deps & BOT_DEPS)
 
     @property
@@ -105,17 +111,31 @@ class ManifestSignals:
             return self.is_package and not self.private and not (self.deps & APP_FRAMEWORKS)
         if self.kind == "pyproject.toml":
             return (
-                self.is_package and not self.has_entry_point and not (self.deps & PY_APP_FRAMEWORKS)
+                self.is_package
+                and not self.has_entry_point
+                and not (self.deps & PY_APP_FRAMEWORKS_NORM)
             )
         return False
 
 
 def _norm_py(name: str) -> str:
+    """PEP 503 normalisation: discord.py, discord_py and Discord-Py are one name."""
     return re.sub(r"[-_.]+", "-", name.strip().lower())
 
 
+PY_BOT_DEPS = {_norm_py(d) for d in BOT_DEPS}
+PY_APP_FRAMEWORKS_NORM = {_norm_py(d) for d in PY_APP_FRAMEWORKS}
+
+
 def parse(name: str, text: str) -> ManifestSignals | None:
-    """Signals from one manifest, or None when the file cannot be read as that format."""
+    """Signals from one manifest, or None when the file cannot be read as that format.
+
+    Third-party input: any failure to parse (bad syntax, a byte order mark, deep nesting,
+    odd types) gives None rather than an exception that would end the run.
+    """
+    text = text.removeprefix("\ufeff")
+    if len(text) > MAX_MANIFEST_CHARS:
+        return None
     try:
         if name == "package.json":
             return _package_json(text)
@@ -125,7 +145,7 @@ def parse(name: str, text: str) -> ManifestSignals | None:
             return _requirements(text)
         if name == "pubspec.yaml":
             return _pubspec(text)
-    except (ValueError, TypeError, AttributeError, tomllib.TOMLDecodeError, yaml.YAMLError):
+    except Exception:
         return None
     return None
 
@@ -139,10 +159,14 @@ def _package_json(text: str) -> ManifestSignals:
         section = pkg.get(key)
         if isinstance(section, dict):
             deps.update(k.lower() for k in section)
+    scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
+    runs = bool(RUN_SCRIPTS & set(scripts))
+    # `npm init` writes "main" by default, so "main" alone is not a sign of a library.
+    publishes = any(pkg.get(k) for k in ("exports", "module", "types", "typings", "files"))
     return ManifestSignals(
         kind="package.json",
         deps=deps,
-        is_package=bool(pkg.get("main") or pkg.get("exports") or pkg.get("module")),
+        is_package=publishes or (bool(pkg.get("main")) and not runs),
         has_entry_point=bool(pkg.get("bin")),
         private=bool(pkg.get("private")),
     )
@@ -160,10 +184,12 @@ def _pyproject(text: str) -> ManifestSignals:
     for spec in poetry.get("dependencies") or {}:
         deps.add(_norm_py(spec))
     scripts = project.get("scripts") or poetry.get("scripts") or {}
+    # A name alone is not enough (every pyproject has one); a build system is.
+    builds = isinstance(doc.get("build-system"), dict)
     return ManifestSignals(
         kind="pyproject.toml",
         deps=deps,
-        is_package=bool(project.get("name") or poetry.get("name")),
+        is_package=builds and bool(project.get("name") or poetry.get("name")),
         has_entry_point=bool(scripts),
     )
 

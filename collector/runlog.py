@@ -45,21 +45,37 @@ def read_events(path: Path) -> list[dict]:
 
 
 def is_finished(path: Path) -> bool:
-    """True when the last start in the log was followed by a finish."""
-    finished = False
+    """True when the last full-run start in the log was followed by a finish.
+
+    Limited runs (--only, --limit-repos, a skipped stage, --offline) do not count, so a
+    quick check on the same day cannot hide a crashed full run from --resume.
+    """
+    finished = True
+    in_full = False
     for ev in read_events(path):
-        if ev.get("event") == "run_started":
-            finished = False
-        elif ev.get("event") == "run_finished":
+        kind = ev.get("event")
+        if kind == "run_started":
+            in_full = not ev.get("limited") and not ev.get("offline")
+            if in_full:
+                finished = False
+        elif kind == "run_finished" and in_full:
             finished = True
     return finished
 
 
+def has_full_run(path: Path) -> bool:
+    return any(
+        ev.get("event") == "run_started" and not ev.get("limited") and not ev.get("offline")
+        for ev in read_events(path)
+    )
+
+
 def latest_unfinished(runs_dir: Path) -> str | None:
-    """Run id of the most recent run log that never reached run_finished."""
+    """Run id of the newest log with a full run, if that full run never finished."""
     if not runs_dir.exists():
         return None
     for path in sorted(runs_dir.glob("*.jsonl"), reverse=True):
-        if read_events(path) and not is_finished(path):
-            return path.stem
+        if not has_full_run(path):
+            continue
+        return None if is_finished(path) else path.stem
     return None

@@ -18,6 +18,7 @@ Stages:
 from __future__ import annotations
 
 import datetime as dt
+import shutil
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -29,7 +30,7 @@ import httpx
 from . import __version__, classify, config, manifests, runlog, store
 from .cache import DiskCache
 from .enrich import fetch_file, fetch_owners, fetch_readme_size, fetch_repos
-from .github import GitHubClient, GitHubError
+from .github import AuthError, GitHubClient, GitHubError, RateLimitGiveUp
 from .models import default_index, extract_fal_ai_ids, extract_partner_ids
 from .queries import (
     ALL_QUERIES,
@@ -52,7 +53,15 @@ FAL_OWNERS = {"fal-ai", "fal-ai-community"}
 PROGRESS_EVERY = 250
 
 
+# A run caches a few hundred MB at most; stop early rather than fail hours in.
+MIN_FREE_BYTES = 1_000_000_000
+
+
 class NothingToResume(RuntimeError):
+    pass
+
+
+class LowDisk(RuntimeError):
     pass
 
 
@@ -158,20 +167,31 @@ def run(
     run_date: str | None = None,
 ) -> dict[str, Any]:
     queries = select_queries(options.only)
+    limited = is_limited(options)
 
     if options.resume:
         run_id = runlog.latest_unfinished(paths.runs)
         if run_id is None:
-            raise NothingToResume("no unfinished run log under data/runs/ to resume")
+            raise NothingToResume("no unfinished full run under data/runs/ to resume")
     else:
         run_id = run_date or runlog.today_utc()
     today = dt.date.fromisoformat(run_id)
+
+    if not options.offline:
+        paths.cache.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(paths.cache).free
+        if free < MIN_FREE_BYTES:
+            raise LowDisk(
+                f"only {free / 1e9:.1f} GB free on the disk that holds {paths.cache}; "
+                f"free at least {MIN_FREE_BYTES / 1e9:.0f} GB before a run"
+            )
 
     journal = runlog.RunLog(paths.runs, run_id)
     journal.event(
         "run_started",
         run_id=run_id,
         collector=__version__,
+        limited=limited,
         queries=[q.id for q in queries],
         resumed=options.resume,
         offline=options.offline,
@@ -207,8 +227,23 @@ def run(
         client.close()
     summary["seconds"] = round(now() - started)
     journal.event("run_finished", totals=summary["totals"], seconds=summary["seconds"])
-    store.write_json_atomic(paths.runs / f"{run_id}.json", summary)
+    # A limited run (--only, --limit-repos, a skipped stage) never replaces the full
+    # run's summary.
+    name = f"{run_id}.limited.json" if limited else f"{run_id}.json"
+    store.write_json_atomic(paths.runs / name, summary)
     return summary
+
+
+def is_limited(options: RunOptions) -> bool:
+    """A run that does not do everything: its outputs must not pass for a full week."""
+    return bool(
+        options.only
+        or options.limit_repos is not None
+        or options.skip_owners
+        or options.skip_manifests
+        or options.skip_readmes
+        or options.skip_scoped
+    )
 
 
 class _Run:
@@ -234,6 +269,10 @@ class _Run:
         self.index = default_index()
         self.exclusions = store.load_exclusions(paths.exclusions)
         self.previous = store.load_repos(paths.repos)
+        # Owners we already hold a name and location for, by lower-case login.
+        self.known_owners: dict[str, Owner] = {
+            r.owner.login.lower(): r.owner for r in self.previous.values()
+        }
         self.previous_mentions = store.load_mentions(paths.mentions)
         self.gone = store.load_gone(paths.gone)
         self.unsearchable = store.load_gone(paths.unsearchable)
@@ -357,14 +396,16 @@ class _Run:
     # -- stage 3: repository lookups -------------------------------------------------------
 
     def lookup_targets(self) -> tuple[list[int], dict[int, str], bool]:
-        # A repo recorded as gone is not asked for again while search still returns the
-        # same repository id (a stale index). A new id under the same name is a new repo.
-        stale = 0
+        """Every repo found this run, plus every repo we knew before and do not know as gone.
+
+        A repo in gone.json that search returns again is looked up again (one request), so a
+        repo that came back is not lost; if it is still gone it stays on the list.
+        """
+        rechecked = 0
         wanted: dict[int, str] = {}
         for h in self.hits.values():
-            if self.gone.get(h.full_name.lower(), {}).get("id") == h.repo_id:
-                stale += 1
-                continue
+            if h.full_name.lower() in self.gone:
+                rechecked += 1
             wanted[h.repo_id] = h.full_name
         for repo in self.previous.values():
             if repo.full_name.lower() not in self.gone:
@@ -375,8 +416,29 @@ class _Run:
         if self.options.limit_repos is not None and len(order) > self.options.limit_repos:
             order = order[: self.options.limit_repos]
             partial = True
-        self.stats["gone_skipped_stale_hits"] = stale
+        self.stats["gone_rechecked"] = rechecked
         return order, wanted, partial
+
+    @staticmethod
+    def manifest_labels(
+        signal: manifests.ManifestSignals | None, old: Repo | None
+    ) -> tuple[bool | None, bool | None]:
+        """(bot, library) from this run's manifest, else from the previous record."""
+        if signal is not None:
+            return signal.bot, signal.library
+        if old is not None:
+            return old.manifest_bot, old.manifest_library
+        return None, None
+
+    def code_possible(self, rid: int) -> bool:
+        """Could this repo end up in the code tier? If not, it gets no owner or README lookup."""
+        hit = self.hits.get(rid)
+        old = self.previous.get(rid)
+        return (
+            (hit is not None and "code" in hit.tiers)
+            or (old is not None and old.evidence == "code")
+            or rid in self.promotion_ids
+        )
 
     # -- stages 4 to 6 ---------------------------------------------------------------------
 
@@ -441,14 +503,16 @@ class _Run:
         fork = bool(data.get("fork"))
         is_template = bool(data.get("is_template"))
         pushed_at = data.get("pushed_at")
+        bot, library = self.manifest_labels(signal, old)
         kind = classify.kind_of(
             name=data.get("name") or full_name.split("/", 1)[-1],
             description=description,
             fork=fork,
             is_template=is_template,
             stars=stars,
-            bot=bool(signal and signal.bot),
-            library=bool(signal and signal.library),
+            bot=bool(bot),
+            library=bool(library),
+            topics=topics,
         )
         code_tier = (
             promoted
@@ -481,7 +545,9 @@ class _Run:
             is_template=is_template,
             fork_source=((data.get("source") or {}).get("full_name")) if fork else None,
             template_source=(data.get("template_repository") or {}).get("full_name"),
-            owner=_owner_from(data, profile, old.owner if old else None),
+            owner=_owner_from(
+                data, profile, old.owner if old else self.known_owners.get(login.lower())
+            ),
             owner_is_fal=is_fal_owner(login),
             evidence="code" if code_tier else "mention",
             sources=sorted(sources),
@@ -502,6 +568,8 @@ class _Run:
                 readme_bytes=readme,
             ),
             readme_bytes=readme,
+            manifest_bot=bot,
+            manifest_library=library,
             first_seen=old.first_seen if old else self.run_id,
             last_seen=self.run_id if (hit or promoted) else (old.last_seen if old else self.run_id),
             stars_history=_history(old.stars_history if old else [], self.run_id, stars),
@@ -546,7 +614,7 @@ class _Run:
         models: dict[int, set[str]] = defaultdict(set)
         clients: dict[int, set[str]] = defaultdict(set)
         promoted: set[int] = set()
-        info = {"requested": 0, "with_hits": 0, "unsearchable": 0, "capped": 0}
+        info = {"requested": 0, "with_hits": 0, "unsearchable": 0, "errors": 0, "capped": 0}
         if self.options.skip_scoped:
             return models, clients, promoted, info
         candidates: list[tuple[int, str, int, str]] = []
@@ -599,7 +667,14 @@ class _Run:
                     }
                     info["unsearchable"] += 1
                     continue
-                raise
+                if isinstance(exc, AuthError | RateLimitGiveUp):
+                    raise
+                # One repo's failure (a 403 page, a 5xx after retries) is logged and skipped.
+                self.journal.event(
+                    "scoped_error", repo=full_name, status=exc.status, message=exc.message[:200]
+                )
+                info["errors"] += 1
+                continue
             code_items = [i for i in items if not is_doc_path(i.get("path", ""))]
             fragments = [
                 m["fragment"]
@@ -609,8 +684,15 @@ class _Run:
             ]
             if code_items:
                 info["with_hits"] += 1
-            fams = self.families_from(fragments, partners=True)
-            models[rid] |= fams
+            # Promotion needs a fal-ai/ model ID or a fal client literal; partner-namespace IDs
+            # count only once the repo shows fal in its code.
+            own = self.families_from(fragments, partners=False)
+            partner = {
+                fam
+                for frag in fragments
+                for pid in extract_partner_ids(frag)
+                if (fam := self.index.match(pid))
+            }
             seen_clients: set[str] = set()
             for i in code_items:
                 base = i.get("path", "").rsplit("/", 1)[-1]
@@ -623,8 +705,10 @@ class _Run:
                     if (fname is None or base == fname) and any(needle in t for t in texts):
                         seen_clients.add(client)
             clients[rid] |= seen_clients
-            if (rid not in built or built[rid].evidence != "code") and (fams or seen_clients):
+            already_code = rid in built and built[rid].evidence == "code"
+            if not already_code and (own or seen_clients):
                 promoted.add(rid)
+            models[rid] |= own | (partner if (already_code or rid in promoted) else set())
             if n % PROGRESS_EVERY == 0:
                 self.log(f"  scoped {n}/{len(candidates)}")
         return models, clients, promoted, info
@@ -644,8 +728,12 @@ class _Run:
 
         order, wanted, partial = self.lookup_targets()
         self.stage("repository lookups", repos=len(order))
+        # Only repos whose previous record we keep may come back as a body-less 304.
         facts, enrich_report = fetch_repos(
-            self.client, [wanted[rid] for rid in order], log=self.log
+            self.client,
+            [wanted[rid] for rid in order],
+            conditional={r.full_name for r in self.previous.values()},
+            log=self.log,
         )
 
         signals = self.read_manifests(facts, order, wanted)
@@ -654,18 +742,19 @@ class _Run:
         readme_candidates = []
         for rid in order:
             fact = facts[wanted[rid]]
-            if fact.data is None:
+            if fact.data is None or not self.code_possible(rid):
                 continue
             d = fact.data
-            sig = signals.get(rid)
+            bot, library = self.manifest_labels(signals.get(rid), self.previous.get(rid))
             kind = classify.kind_of(
                 name=d.get("name") or d["full_name"].split("/", 1)[-1],
                 description=_clean(d.get("description")),
                 fork=bool(d.get("fork")),
                 is_template=bool(d.get("is_template")),
                 stars=int(d.get("stargazers_count") or 0),
-                bot=bool(sig and sig.bot),
-                library=bool(sig and sig.library),
+                bot=bool(bot),
+                library=bool(library),
+                topics=list(d.get("topics") or []),
             )
             if classify.needs_readme(
                 fork=bool(d.get("fork")),
@@ -678,19 +767,23 @@ class _Run:
                 readme_candidates.append((rid, d["full_name"]))
         readmes = self.read_readmes(readme_candidates)
 
+        # Owners of repos that can be in the code tier; mentions store no profile fields.
         logins = sorted(
             {
                 (facts[wanted[rid]].data.get("owner") or {}).get("login", "")
                 for rid in order
-                if facts[wanted[rid]].data
+                if facts[wanted[rid]].data and self.code_possible(rid)
             }
             - {""},
             key=str.lower,
         )
+        logins = [lg for lg in logins if not self.exclusions.drops("", lg)]
         profiles: dict[str, dict | None] = {}
         if not self.options.skip_owners:
             self.stage("owners", owners=len(logins))
-            profiles = fetch_owners(self.client, logins, log=self.log)
+            profiles = fetch_owners(
+                self.client, logins, conditional=set(self.known_owners), log=self.log
+            )
 
         built: dict[int, Repo] = {}
         for rid in order:
@@ -703,7 +796,14 @@ class _Run:
                 continue
             data = fact.data
             real_id = int(data["id"])
-            old = self.previous.get(real_id, old)
+            if real_id != rid:
+                # The name now belongs to a different repository (renamed and re-created,
+                # or deleted and re-created). Keep what we knew about rid; the other repo
+                # gets its own record only through its own hit.
+                self.journal.event("name_reused", repo=wanted[rid], id=rid, now_id=real_id)
+                if old is not None:
+                    built[rid] = self.carry_forward(old, hit)
+                continue
             login = (data.get("owner") or {}).get("login", "")
             if self.exclusions.drops(data["full_name"], login):
                 continue
@@ -732,7 +832,11 @@ class _Run:
                         "clients": sorted(set(rec.clients) | scoped_clients.get(rid, set())),
                     }
                 )
-        new_promoted = [rid for rid in promoted if rid not in built]
+        new_promoted = [
+            rid
+            for rid in promoted
+            if rid not in built and not self.excluded(self.mention_hits[rid].item["full_name"])
+        ]
         if new_promoted:
             names = [self.mention_hits[rid].item["full_name"] for rid in new_promoted]
             self.stage("promoted lookups", repos=len(names))
@@ -743,14 +847,21 @@ class _Run:
                 - set(profiles),
                 key=str.lower,
             )
+            plogins = [lg for lg in plogins if not self.exclusions.drops("", lg)]
             if plogins and not self.options.skip_owners:
-                profiles.update(fetch_owners(self.client, plogins, log=self.log))
+                profiles.update(
+                    fetch_owners(
+                        self.client, plogins, conditional=set(self.known_owners), log=self.log
+                    )
+                )
             for rid, name in zip(new_promoted, names, strict=True):
                 pf = pfacts.get(name)
                 if pf is None or pf.data is None:
                     continue
                 login = (pf.data.get("owner") or {}).get("login", "")
-                built[int(pf.data["id"])] = self.build_record(
+                if int(pf.data["id"]) != rid or self.exclusions.drops(pf.data["full_name"], login):
+                    continue
+                built[rid] = self.build_record(
                     pf.data,
                     None,
                     self.previous.get(rid),
@@ -797,30 +908,51 @@ class _Run:
                 self.gone.pop(name.lower(), None)
 
         mentions = self.build_mentions(built)
+        promoted_count = sum(
+            1 for rid in promoted if rid in built and built[rid].evidence == "code"
+        )
 
         # Stage 8: write. repos.json holds the code tier; every mention is in mentions.json.
         repos = [r for r in built.values() if r.evidence == "code"]
         store.save_repos(self.paths.repos, repos)
         store.save_mentions(self.paths.mentions, mentions)
-        store.save_gone(self.paths.gone, self.gone)
-        store.save_gone(self.paths.unsearchable, self.unsearchable)
-        core_prefixes = (f"{config.API_ROOT}/repos/", f"{config.API_ROOT}/users/")
-        store.save_etags(
-            self.paths.etags,
-            {u: e for u, e in self.client.etags.items() if u.startswith(core_prefixes)},
+        store.save_gone(
+            self.paths.gone, {k: v for k, v in self.gone.items() if not self.excluded(k)}
         )
+        store.save_gone(
+            self.paths.unsearchable,
+            {k: v for k, v in self.unsearchable.items() if not self.excluded(k)},
+        )
+        store.save_etags(self.paths.etags, self.etags_to_keep(repos))
         snapshot = self.snapshot(repos, mentions)
-        store.write_json_atomic(self.paths.snapshots / f"{self.run_id}.json", snapshot)
+        limited = is_limited(self.options)
+        if not limited:
+            # Only a full run is a week on the record (digests compare snapshots).
+            store.write_json_atomic(self.paths.snapshots / f"{self.run_id}.json", snapshot)
         return self.summary(
             repos,
             mentions,
             snapshot,
             enrich_report,
-            partial,
+            partial or limited,
             scoped_info,
-            len(promoted),
+            promoted_count,
             len(profiles),
         )
+
+    def etags_to_keep(self, repos: list[Repo]) -> dict[str, str]:
+        """ETags for next week: the code-tier repos and their owners, nothing else.
+
+        Those are the only lookups that may come back as a body-less 304, because their
+        previous record is in repos.json. Excluded repos and owners are never kept.
+        """
+        keep_repos = {f"{config.API_ROOT}/repos/{r.full_name}".lower() for r in repos}
+        keep_users = {f"{config.API_ROOT}/users/{r.owner.login}".lower() for r in repos}
+        return {
+            url: etag
+            for url, etag in self.client.etags.items()
+            if url.lower() in keep_repos or url.lower() in keep_users
+        }
 
     def build_mentions(self, built: dict[int, Repo]) -> list[Mention]:
         code_ids = {rid for rid, r in built.items() if r.evidence == "code"}
@@ -852,27 +984,36 @@ class _Run:
                 first_seen=old.first_seen if old else self.run_id,
                 last_seen=self.run_id,
             )
+        # Docs-only code-search hits: looked up, built as mention records.
         for rid, rec in built.items():
-            if rec.evidence == "mention" and rid not in out:
-                out[rid] = Mention(
-                    id=rid,
-                    full_name=rec.full_name,
-                    html_url=rec.html_url,
-                    description=rec.description,
-                    stars=rec.stars,
-                    language=rec.language,
-                    topics=rec.topics,
-                    created_at=rec.created_at,
-                    pushed_at=rec.pushed_at,
-                    archived=rec.archived,
-                    owner_login=rec.owner.login,
-                    owner_type=rec.owner.type,
-                    owner_avatar_url=rec.owner.avatar_url,
-                    owner_is_fal=rec.owner_is_fal,
-                    sources=rec.sources,
-                    first_seen=rec.first_seen,
-                    last_seen=rec.last_seen,
-                )
+            if rec.evidence != "mention" or rid in out:
+                continue
+            old = self.previous_mentions.get(rid)
+            out[rid] = Mention(
+                id=rid,
+                full_name=rec.full_name,
+                html_url=rec.html_url,
+                description=rec.description,
+                stars=rec.stars,
+                language=rec.language,
+                topics=rec.topics,
+                created_at=rec.created_at,
+                pushed_at=rec.pushed_at,
+                archived=rec.archived,
+                owner_login=rec.owner.login,
+                owner_type=rec.owner.type,
+                owner_avatar_url=rec.owner.avatar_url,
+                owner_is_fal=rec.owner_is_fal,
+                sources=sorted(set(rec.sources) | (set(old.sources) if old else set())),
+                first_seen=old.first_seen if old else rec.first_seen,
+                last_seen=rec.last_seen,
+            )
+        # A run without repository search (a limited run) keeps last week's mentions.
+        if not any(q.kind == "repo" for q in self.queries):
+            for rid, old in self.previous_mentions.items():
+                if rid in out or rid in code_ids or self.excluded(old.full_name):
+                    continue
+                out[rid] = old
         return list(out.values())
 
     def snapshot(self, repos: list[Repo], mentions: list[Mention]) -> dict[str, Any]:
@@ -899,8 +1040,9 @@ class _Run:
             "builders": len({r.owner.login.lower() for r in headline}),
             "notable": sum(1 for r in headline if r.notable),
             "active": sum(1 for r in headline if r.active),
-            "mentions": len(mentions),
+            "mentions": sum(1 for m in mentions if not m.owner_is_fal),
             "from_fal": sum(1 for r in repos if r.evidence == "code" and r.owner_is_fal),
+            "from_fal_mentions": sum(1 for m in mentions if m.owner_is_fal),
             "clients": dict(sorted(Counter(c for r in headline for c in r.clients).items())),
             "kinds": dict(sorted(Counter(r.kind for r in headline).items())),
             "stacks": dict(sorted(Counter(s for r in headline for s in r.stack).items())),
@@ -930,12 +1072,13 @@ class _Run:
             "code_tier_forks": sum(1 for r in code if r.fork),
             "fal_template_copies": sum(1 for r in code if _from_fal_template(r)),
             "from_fal": sum(1 for r in code if r.owner_is_fal),
-            "mentions": len(mentions),
+            "mentions": sum(1 for m in mentions if not m.owner_is_fal),
+            "from_fal_mentions": sum(1 for m in mentions if m.owner_is_fal),
             "promoted": promoted_count,
             "repos_in_file": len(repos),
             "found_this_run": len(self.hits),
             "gone": len(enrich_report.gone),
-            "gone_skipped_stale_hits": self.stats.get("gone_skipped_stale_hits", 0),
+            "gone_rechecked": self.stats.get("gone_rechecked", 0),
             "renamed": len(enrich_report.renamed),
             "model_families_with_repos": sum(
                 1 for v in snapshot["families"].values() if v["repos"]

@@ -65,6 +65,10 @@ class Repo(BaseModel):
     notable: bool
     # README size in bytes, looked up only when it decides "notable"; None when not looked up.
     readme_bytes: int | None = None
+    # What the repo's manifest said, kept so a run that reads no manifest keeps the labels.
+    # None: no manifest read yet.
+    manifest_bot: bool | None = None
+    manifest_library: bool | None = None
     first_seen: str
     last_seen: str
     stars_history: list[StarsPoint]

@@ -3,7 +3,44 @@
  "collector": "0.1.0",
  "partial": false,
  "resumed": false,
- "offline": false,
+ "offline": true,
+ "totals": {
+  "headline": 2092,
+  "headline_builders": 1868,
+  "headline_notable": 219,
+  "headline_active": 659,
+  "code_tier": 2102,
+  "code_tier_forks": 0,
+  "fal_template_copies": 0,
+  "from_fal": 10,
+  "mentions": 0,
+  "promoted": 0,
+  "repos_in_file": 2102,
+  "found_this_run": 2102,
+  "gone": 0,
+  "gone_skipped_stale_hits": 0,
+  "renamed": 0,
+  "model_families_with_repos": 0
+ },
+ "coverage": [
+  {
+   "id": "js-client",
+   "kind": "code",
+   "q": "\"@fal-ai/client\" filename:package.json",
+   "total_count": 2132,
+   "sum_of_slice_totals": 2274,
+   "slices": 11,
+   "truncated_slices": 0,
+   "sampled": false,
+   "incomplete": false,
+   "files": 2223,
+   "literal_match": 2222,
+   "dropped": 1,
+   "in_docs": 0,
+   "repos": 2102,
+   "requests": 40
+  }
+ ],
  "queries": [
   {
    "id": "js-client",
@@ -114,58 +151,35 @@
    "counted_repos": 2102
   }
  ],
- "totals": {
-  "headline": 2102,
-  "repos": 2102,
-  "code_tier": 2102,
-  "mention_tier": 0,
-  "code_tier_non_fork": 2102,
-  "code_tier_notable": 223,
-  "code_tier_active": 662,
-  "owners": 1870,
-  "headline_owners": 1870,
-  "fal_template_copies": 0,
-  "found_this_run": 2102,
-  "gone": 0,
-  "gone_skipped_stale_hits": 0,
-  "renamed": 0
- },
- "kinds": {
-  "app": 2029,
-  "plugin": 4,
-  "research": 1,
-  "template": 68
- },
- "clients": {
-  "js": 2102
- },
  "enrichment": {
   "requested": 2102,
   "ok": 2102,
   "not_modified": 0,
   "gone": [],
   "renamed": {},
-  "owners_looked_up": 0
+  "owners_looked_up": 0,
+  "manifests_requested": 0,
+  "manifests_read": 0,
+  "readmes_requested": 0
+ },
+ "scoped": {
+  "requested": 0,
+  "with_hits": 0,
+  "unsearchable": 0,
+  "capped": 0
  },
  "unknown_model_ids": {},
  "requests": {
   "code_search": {
-   "requests": 40,
-   "cache_hits": 0,
+   "requests": 0,
+   "cache_hits": 40,
    "not_modified": 0,
    "retries": 0,
-   "slept": 183.8764510154724
+   "slept": 0.0
   },
   "core": {
-   "requests": 2102,
-   "cache_hits": 0,
-   "not_modified": 0,
-   "retries": 0,
-   "slept": 706.8664898872375
-  },
-  "meta": {
-   "requests": 1,
-   "cache_hits": 0,
+   "requests": 0,
+   "cache_hits": 2102,
    "not_modified": 0,
    "retries": 0,
    "slept": 0.0
@@ -178,9 +192,10 @@
   "Punctuation is ignored in code search phrases, so each hit is checked against the literal string in its text-match fragments."
  ],
  "notes": [
-  "headline: code tier, not a fork, not generated from one of fal's own templates.",
-  "notable is a lower bound until the README lookup exists (Phase 1).",
-  "models are those seen in code search fragments: models seen in code, at least."
+  "headline: code tier, not a fork, not owned by fal, not a copy of a fal template.",
+  "models: families seen in code search fragments, a lower bound.",
+  "model families: file counts are GitHub's estimate for the unsliced query; repo mapping sampled at 3 pages per family.",
+  "scoped searches: notable repos and mention repos with 20+ stars, at most 500 per run, first page only."
  ],
- "seconds": 1862
+ "seconds": 2
 }

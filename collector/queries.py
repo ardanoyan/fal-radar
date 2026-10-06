@@ -216,11 +216,28 @@ ALL_QUERIES: dict[str, Query] = {
 }
 
 # Files whose text is documentation, not code. A hit in one of these is a mention.
-DOC_EXTENSIONS = (".md", ".mdx", ".markdown", ".rst", ".adoc")
+DOC_EXTENSIONS = (".md", ".mdx", ".markdown", ".rst", ".adoc", ".mdc", ".txt")
+# Names that are documentation whatever their extension (README, CHANGELOG, llms.txt files
+# that copy fal's docs for AI assistants).
+DOC_NAME_PREFIXES = ("readme", "changelog", "llms")
+# AI coding assistant rule files and folders: prose, often a copy of fal's docs.
+DOC_DOTFILES = (".cursorrules", ".windsurfrules", ".clinerules")
+DOC_DIRS = (".cursor/", ".windsurf/", ".clinerules/", ".github/instructions/", ".github/prompts/")
+# Text files that are code: pip requirement and constraint files.
+CODE_TXT_PREFIXES = ("requirements", "constraints")
 
 
 def is_doc_path(path: str) -> bool:
-    return path.lower().endswith(DOC_EXTENSIONS)
+    """True for documentation and prose: a hit there is a mention, not code."""
+    p = path.lower()
+    name = p.rsplit("/", 1)[-1]
+    if name.startswith(DOC_NAME_PREFIXES) or name in DOC_DOTFILES:
+        return True
+    if any(p.startswith(d) or f"/{d}" in p for d in DOC_DIRS):
+        return True
+    if name.endswith(".txt") and name.startswith(CODE_TXT_PREFIXES):
+        return False
+    return name.endswith(DOC_EXTENSIONS)
 
 
 def verify(query: Query, fragments: list[str]) -> bool:

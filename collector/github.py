@@ -151,8 +151,15 @@ class GitHubClient:
         accept: str | None = None,
         refresh: bool = False,
         use_cache: bool = True,
+        conditional: bool = False,
     ) -> Response:
-        """GET one resource. Returns terminal statuses (404 and friends) instead of raising."""
+        """GET one resource. Returns terminal statuses (404 and friends) instead of raising.
+
+        A cached body from an earlier run is revalidated with its ETag; a 304 then returns
+        that body. An ETag without a body (from data/etags.json, or a body-less 304 entry)
+        is sent only when `conditional` is set, because the caller then gets a 304 with no
+        data and must be able to keep its own copy (the previous repos.json record).
+        """
         url = build_url(path, params)
         entry = self.cache.get(url) if use_cache else None
         if entry is not None and entry.run_id == self.run_id and not refresh:
@@ -183,9 +190,11 @@ class GitHubClient:
             headers["Accept"] = accept
         etag = None
         if bucket == "core" and not refresh:
-            if entry is not None and entry.status in (200, 304) and entry.etag:
+            has_body = entry is not None and entry.status == 200
+            bodiless = entry is not None and entry.status == 304
+            if entry is not None and entry.etag and (has_body or (conditional and bodiless)):
                 etag = entry.etag
-            elif entry is None:
+            elif conditional and entry is None:
                 etag = self.etags.get(url)
         if etag:
             headers["If-None-Match"] = etag
@@ -212,7 +221,9 @@ class GitHubClient:
 
         if status in TERMINAL_STATUSES:
             body = {"message": _message(resp)}
-            self._store(url, status, None, body, use_cache)
+            # A 404 or 403 on a repository or user is an answer about that resource. On a
+            # search it can be a one-off, so it is not cached: a resume asks again.
+            self._store(url, status, None, body, use_cache and bucket == "core")
             self.etags.pop(url, None)
             return Response(url, status, body)
 

@@ -271,6 +271,8 @@ class FakeGitHub:
                 answer = SCOPED.get(name, [])
                 if answer == 422:
                     return json_response(422, {"message": "Validation Failed"})
+                if answer == 403:
+                    return json_response(403, {"message": "Forbidden"})
                 items = [search_item(name, p, f) for p, f in answer]
             elif "@fal-ai/client" in q:
                 items = [
@@ -320,11 +322,11 @@ def env(tmp_path, monkeypatch):
     return paths
 
 
-def run(paths, fake, *, date="2026-10-05", clock=None, only=("js-client",), **options):
+def run(paths, fake, *, date="2026-10-05", clock=None, only=("js-client",), full=False, **options):
     clock = clock or FakeClock()
     return pipeline.run(
         paths,
-        pipeline.RunOptions(only=list(only), **options),
+        pipeline.RunOptions(only=[] if full else list(only), **options),
         transport=httpx.MockTransport(fake),
         sleep=clock.sleep,
         now=clock.now,
@@ -444,10 +446,12 @@ def test_scoped_models_ignore_docs(env):
 
 
 def test_snapshot_counts_headline_repos(env):
-    run(env, FakeGitHub())
+    run(env, FakeGitHub(), full=True)
     snap = json.loads((env.snapshots / "2026-10-05.json").read_text())
-    assert snap["headline"] == 4 and snap["from_fal"] == 1 and snap["mentions"] == 1
-    assert snap["families"]["flux"]["repos"] == 1 and snap["families"]["kling"]["repos"] == 1
+    # gina is promoted; dora (docs), hank and jill stay mentions.
+    assert snap["headline"] == 5 and snap["from_fal"] == 1 and snap["mentions"] == 3
+    # flux: alice (page.tsx) and gina (promoted); kling: alice (scoped search).
+    assert snap["families"]["flux"]["repos"] == 2 and snap["families"]["kling"]["repos"] == 1
     assert snap["kinds"]["bot"] == 1 and snap["kinds"]["library"] == 1
 
 
@@ -485,9 +489,20 @@ def test_run_log_records_queries_facts_and_finish(env):
     assert names[0] == "run_started" and names[-1] == "run_finished"
     assert "query_finished" in names and "slice" in names and "stage" in names
     assert any("4,000" in fact for fact in events[0]["api_facts"])
-    summary = json.loads((env.runs / "2026-10-05.json").read_text())
-    assert summary["totals"]["repos_in_file"] == 7
+    assert events[0]["limited"] is True
+    summary = json.loads((env.runs / "2026-10-05.limited.json").read_text())
+    assert summary["totals"]["repos_in_file"] == 7 and summary["partial"]
     assert any("ETag" in fact for fact in summary["api_facts"])
+    # A limited run writes no snapshot and no full-run summary.
+    assert not (env.runs / "2026-10-05.json").exists()
+    assert not (env.snapshots / "2026-10-05.json").exists()
+
+
+def test_full_run_writes_snapshot_and_summary(env):
+    run(env, FakeGitHub(), full=True)
+    summary = json.loads((env.runs / "2026-10-05.json").read_text())
+    assert not summary["partial"]
+    assert (env.snapshots / "2026-10-05.json").exists()
 
 
 def test_week_two_with_304s_keeps_records_and_recomputes_dates(env):
@@ -504,15 +519,27 @@ def test_week_two_with_304s_keeps_records_and_recomputes_dates(env):
     assert not a["active"]
     assert a["owner"]["name"] == "Alice Example"
     assert a["kind"] == "app" and a["stack"] == ["next"]
-    sent = [
-        r.headers.get("if-none-match")
+    sent = {
+        r.url.path[len("/repos/") :]: r.headers.get("if-none-match")
         for r in fake.requests
         if r.url.path.startswith("/repos/") and r.url.path.count("/") == 3
-    ]
-    assert sent and all(sent)
+    }
+    # Code-tier repos are revalidated; dora (a mention) is fetched in full.
+    assert all(v for k, v in sent.items() if k != "dora/readme-only")
+    assert sent["dora/readme-only"] is None
+    # Manifests and READMEs never go conditional: a 304 there would have no body.
+    assert not any(
+        r.headers.get("if-none-match")
+        for r in fake.requests
+        if "/contents/" in r.url.path or r.url.path.endswith("/readme")
+    )
+    assert load(env)["acme/bot"]["kind"] == "bot"  # kept from the stored manifest label
+    etags = json.loads(env.etags.read_text())
+    assert all("/contents/" not in u and not u.endswith("/readme") for u in etags)
+    assert "https://api.github.com/repos/dora/readme-only" not in etags
 
 
-def test_gone_repos_are_recorded_and_skipped_next_time(env):
+def test_gone_repos_are_recorded_and_rechecked_only_when_search_finds_them(env):
     run(env, FakeGitHub())
 
     # Week 2: acme/bot was deleted. Search no longer returns it; the lookup answers 404.
@@ -525,38 +552,63 @@ def test_gone_repos_are_recorded_and_skipped_next_time(env):
     }
     assert "acme/bot" not in load(env)
 
-    # Week 3: a stale index still returns it with the same id. It is not asked for again.
+    # Week 3: search does not return it: it is not asked for.
     week3 = FakeGitHub()
-    week3.gone = {"acme/bot"}
-    summary = run(env, week3, date="2026-10-19")
+    week3.hidden_from_search = {"acme/bot"}
+    run(env, week3, date="2026-10-19")
     assert "/repos/acme/bot" not in {r.url.path for r in week3.requests}
-    assert summary["totals"]["gone_skipped_stale_hits"] == 1
+
+    # Week 4: search returns it (a stale index): one lookup, still 404, stays on the list.
+    week4 = FakeGitHub()
+    week4.gone = {"acme/bot"}
+    summary = run(env, week4, date="2026-10-26")
+    assert "/repos/acme/bot" in {r.url.path for r in week4.requests}
+    assert summary["totals"]["gone_rechecked"] == 1
     assert "acme/bot" in json.loads(env.gone.read_text())
 
-    # Week 4: someone re-creates acme/bot (new id). It is looked up and leaves the list.
-    IDS["acme/bot"] = 44
-    REPOS["acme/bot"]["id"] = 44
-    try:
-        week4 = FakeGitHub()
-        run(env, week4, date="2026-10-26")
-    finally:
-        IDS["acme/bot"] = 4
-        REPOS["acme/bot"]["id"] = 4
-    assert "/repos/acme/bot" in {r.url.path for r in week4.requests}
+    # Week 5: it is public again: it comes back and leaves the list.
+    run(env, FakeGitHub(), date="2026-11-02")
     assert json.loads(env.gone.read_text()) == {}
     assert "acme/bot" in load(env)
+
+
+def test_a_reused_name_does_not_inherit_the_old_record(env):
+    run(env, FakeGitHub())
+    week2 = FakeGitHub()
+    week2.hidden_from_search = {"alice/studio"}
+    real = week2.__call__
+
+    def answer(request):
+        if request.url.path == "/repos/alice/studio":
+            body = repo_body("alice/studio")
+            body.update(
+                id=100,
+                description="Unrelated notes",
+                stargazers_count=0,
+                created_at="2026-10-10T00:00:00Z",
+            )
+            return json_response(200, body)
+        return real(request)
+
+    run(env, answer, date="2026-10-12")
+    repos = {r["id"]: r for r in json.loads(env.repos.read_text())}
+    assert 100 not in repos
+    assert repos[1]["full_name"] == "alice/studio" and repos[1]["models"] == ["flux", "kling"]
 
 
 def test_failed_run_leaves_data_alone_and_resume_replays_the_cache(env):
     fake = FakeGitHub()
     fake.fail_repo = "carol/studio"
     with pytest.raises(GitHubError):
-        run(env, fake)
+        run(env, fake, full=True)
     assert not env.repos.exists()
     assert runlog.latest_unfinished(env.runs) == "2026-10-05"
 
+    # A quick limited run the same day must not hide the crashed full run.
+    run(env, FakeGitHub())
+    assert runlog.latest_unfinished(env.runs) == "2026-10-05"
     retry = FakeGitHub()
-    run(env, retry, resume=True)
+    run(env, retry, resume=True, full=True)
     # Discovery searches replay from the cache; only the stages after the crash are new.
     discovery = [
         r for r in retry.requests if r.url.path == "/search/code" and "repo%3A" not in str(r.url)
@@ -565,7 +617,7 @@ def test_failed_run_leaves_data_alone_and_resume_replays_the_cache(env):
     assert {"/repos/alice/studio", "/repos/acme/bot"}.isdisjoint(
         {r.url.path for r in retry.requests}
     )
-    assert set(load(env)) == CODE_TIER
+    assert set(load(env)) == CODE_TIER | {"gina/big-mention"}
     assert runlog.latest_unfinished(env.runs) is None
 
 
@@ -609,3 +661,66 @@ def test_queries_check_literal_strings():
     assert all(q.needles for q in ALL_QUERIES.values() if q.kind == "code")
     assert ALL_QUERIES["model-flux"].max_pages == 3
     assert "stars:>=20" in ALL_QUERIES["promote-mention-readme"].q
+
+
+def test_excluded_owner_leaves_no_trace_in_committed_files(env):
+    run(env, FakeGitHub(), full=True)
+    env.exclusions.write_text(json.dumps({"repos": [], "owners": ["acme", "jill"]}))
+    fake = FakeGitHub()
+    run(env, fake, full=True, date="2026-10-12")
+    for path in (env.repos, env.mentions, env.etags, env.gone, env.unsearchable):
+        text = path.read_text().lower()
+        assert "acme" not in text and "jill" not in text, path.name
+    assert not any(r.url.path in ("/users/acme", "/users/jill") for r in fake.requests)
+
+
+def test_docs_only_repos_get_no_owner_or_readme_lookup(env):
+    fake = FakeGitHub()
+    run(env, fake)
+    paths = {r.url.path for r in fake.requests}
+    assert "/repos/dora/readme-only" in paths  # stars and dates come from the lookup
+    assert "/users/dora" not in paths and "dora/readme-only" not in fake.readmes
+
+
+def test_fal_owned_mentions_are_not_counted(env, monkeypatch):
+    MENTION_REPOS["fal-ai/some-demo"] = dict(id=30, stars=5, desc="fal demo")
+    try:
+        summary = run(env, FakeGitHub(), full=True)
+    finally:
+        del MENTION_REPOS["fal-ai/some-demo"]
+    assert summary["totals"]["mentions"] == 3 and summary["totals"]["from_fal_mentions"] == 1
+
+
+def test_a_partner_id_alone_does_not_promote(env):
+    SCOPED["gina/big-mention"] = [
+        ("src/x.py", 'MODEL = "openai/gpt-image-2"  # fal.ai or replicate')
+    ]
+    try:
+        run(env, FakeGitHub(), full=True)
+    finally:
+        SCOPED["gina/big-mention"] = [
+            ("src/gen.py", 'import fal_client\nfal_client.subscribe("fal-ai/flux/schnell")')
+        ]
+    assert "gina/big-mention" not in load(env)
+    assert "gina/big-mention" in load_mentions(env)
+
+
+def test_a_failing_scoped_search_is_skipped_not_fatal(env):
+    SCOPED["gina/big-mention"] = 403
+    try:
+        summary = run(env, FakeGitHub(), full=True)
+    finally:
+        SCOPED["gina/big-mention"] = [
+            ("src/gen.py", 'import fal_client\nfal_client.subscribe("fal-ai/flux/schnell")')
+        ]
+    assert summary["scoped"]["errors"] == 1
+
+
+def test_low_disk_stops_the_run_before_it_starts(env, monkeypatch):
+    import collections
+
+    usage = collections.namedtuple("usage", "total used free")
+    monkeypatch.setattr(pipeline.shutil, "disk_usage", lambda p: usage(10, 10, 100_000_000))
+    with pytest.raises(pipeline.LowDisk):
+        run(env, FakeGitHub())
+    assert not (env.runs / "2026-10-05.jsonl").exists()

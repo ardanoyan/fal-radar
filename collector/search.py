@@ -1,16 +1,20 @@
-"""Code search with paging, and slicing by file size past the 1,000 result cap.
+"""Code and repository search with paging, and slicing past the 1,000 result cap.
 
-GET /search/code returns at most 1,000 results per query and has no stable order.
-When a query reports more, it is split into file size ranges (size:lo..hi), each range
-bisected until it holds 1,000 results or fewer. Results are deduped on (repository,
-path), and the sum of the slice totals is kept next to the unsliced total so the
-coverage can be shown, not assumed.
+Both searches return at most 1,000 results per query, have no stable order, and report
+a total_count that is an estimate and can grow between pages. So:
+- paging continues while pages come back full, not only up to page 1's total;
+- the largest total seen on any page is the slice's total;
+- a query or slice whose total passes 1,000 is split (code search by file size,
+  size:lo..hi; repository search by creation day, created:a..b), each slice its own search;
+- results are deduped (code: repository and path; repositories: id), and the sum of
+  slice totals is kept next to the unsliced total so coverage is shown, not assumed;
+- a runaway query stops at MAX_REQUESTS_PER_QUERY and reports what it did not reach,
+  instead of ending the whole run.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import math
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -25,6 +29,11 @@ MAX_PAGES = RESULT_CAP // PER_PAGE
 MAX_INDEXED_BYTES = 384 * 1024
 MAX_INCOMPLETE_RETRIES = 2
 MAX_REQUESTS_PER_QUERY = 600
+FIRST_CREATED = dt.date(2008, 1, 1)  # GitHub's launch year; no repository is older.
+
+
+class BudgetExhausted(Exception):
+    """A single query used up its request budget."""
 
 
 @dataclass
@@ -52,6 +61,9 @@ class QueryReport:
     repos: int = 0
     truncated_slices: int = 0
     requests: int = 0
+    # Set when the query hit MAX_REQUESTS_PER_QUERY; lists the slices it never read.
+    budget_exhausted: bool = False
+    unvisited: list[str] = field(default_factory=list)
     # Filled in by the pipeline: hits whose fragments contain the literal string,
     # hits that do not (dropped), and hits in documentation files (mention tier).
     verified_files: int = 0
@@ -68,62 +80,201 @@ class _Budget:
         self.used = 0
         self.limit = limit
 
-    def spend(self, q: str) -> None:
+    def spend(self) -> None:
+        if self.used >= self.limit:
+            raise BudgetExhausted
         self.used += 1
-        if self.used > self.limit:
-            raise GitHubError(
-                0, "/search/code", f"query needs more than {self.limit} requests: {q}"
-            )
 
 
-def _fetch(
-    client: GitHubClient, q: str, page: int, budget: _Budget, *, refresh: bool = False
-) -> dict:
-    budget.spend(q)
-    resp = client.get(
-        "/search/code",
-        {"q": q, "per_page": PER_PAGE, "page": page},
-        bucket="code_search",
-        accept=TEXT_MATCH,
-        refresh=refresh,
-    )
-    if resp.status != 200 or not isinstance(resp.data, dict):
-        message = (resp.data or {}).get("message", "") if isinstance(resp.data, dict) else ""
-        raise GitHubError(resp.status, resp.url, message or "code search did not return results")
-    return resp.data
+@dataclass
+class _Paged:
+    items: list[dict]
+    pages: int
+    total: int  # the largest total_count seen on any page
+    full_to_cap: bool  # the last allowed page came back full: there may be more
 
 
-def _first_page(client: GitHubClient, q: str, budget: _Budget) -> dict:
+Fetch = Callable[[str, int, bool], dict]
+
+
+def _first_page(fetch: Fetch, q: str) -> dict:
     """Page 1, asked again when GitHub says the search timed out before finishing."""
-    data = _fetch(client, q, 1, budget)
+    data = fetch(q, 1, False)
     tries = 0
     while data.get("incomplete_results") and tries < MAX_INCOMPLETE_RETRIES:
         tries += 1
-        data = _fetch(client, q, 1, budget, refresh=True)
+        data = fetch(q, 1, True)
     return data
 
 
-def _page_through(
-    client: GitHubClient, q: str, first: dict, budget: _Budget, max_pages: int
-) -> tuple[list[dict], int]:
+def _page_through(fetch: Fetch, q: str, first: dict, max_pages: int) -> _Paged:
     items = list(first.get("items", []))
     total = int(first.get("total_count", 0))
-    last_page = min(math.ceil(min(total, RESULT_CAP) / PER_PAGE), max_pages)
-    pages = 1
-    for page in range(2, last_page + 1):
+    last_full = len(first.get("items", [])) >= PER_PAGE
+    page = 1
+    while page < max_pages and (page * PER_PAGE < min(total, RESULT_CAP) or last_full):
         try:
-            data = _fetch(client, q, page, budget)
+            data = fetch(q, page + 1, False)
         except GitHubError as exc:
-            # The total can shrink between pages; a page past the end answers 422.
+            # A page past the end of the results answers 422.
             if exc.status == 422:
                 break
             raise
-        pages += 1
+        page += 1
         batch = data.get("items", [])
+        total = max(total, int(data.get("total_count", 0)))
         if not batch:
             break
         items.extend(batch)
-    return items, pages
+        last_full = len(batch) >= PER_PAGE
+    return _Paged(items, page, total, page >= max_pages and last_full)
+
+
+def _code_fetcher(client: GitHubClient, budget: _Budget) -> Fetch:
+    def fetch(q: str, page: int, refresh: bool) -> dict:
+        budget.spend()
+        resp = client.get(
+            "/search/code",
+            {"q": q, "per_page": PER_PAGE, "page": page},
+            bucket="code_search",
+            accept=TEXT_MATCH,
+            refresh=refresh,
+        )
+        if resp.status != 200 or not isinstance(resp.data, dict):
+            message = (resp.data or {}).get("message", "") if isinstance(resp.data, dict) else ""
+            raise GitHubError(resp.status, resp.url, message or "code search failed")
+        return resp.data
+
+    return fetch
+
+
+def _repo_fetcher(client: GitHubClient, budget: _Budget) -> Fetch:
+    def fetch(q: str, page: int, refresh: bool) -> dict:
+        budget.spend()
+        resp = client.get(
+            "/search/repositories",
+            {"q": q, "per_page": PER_PAGE, "page": page, "sort": "stars", "order": "desc"},
+            bucket="search",
+            refresh=refresh,
+        )
+        if resp.status != 200 or not isinstance(resp.data, dict):
+            message = (resp.data or {}).get("message", "") if isinstance(resp.data, dict) else ""
+            raise GitHubError(resp.status, resp.url, message or "repository search failed")
+        return resp.data
+
+    return fetch
+
+
+def _search(
+    report: QueryReport,
+    fetch: Fetch,
+    q: str,
+    key: Callable[[dict], Any],
+    whole_range: tuple[Any, Any],
+    split: Callable[[Any, Any], tuple[tuple[Any, Any], tuple[Any, Any]] | None],
+    qualifier: Callable[[Any, Any], str],
+    tail: tuple[Any, Any] | None,
+    on_slice: Callable[[SliceReport], None] | None,
+    max_pages: int | None,
+) -> list[dict]:
+    """Shared paging and slicing for both searches."""
+    seen: set = set()
+    items: list[dict] = []
+
+    def keep(batch: list[dict]) -> int:
+        added = 0
+        for item in batch:
+            k = key(item)
+            if k not in seen:
+                seen.add(k)
+                items.append(item)
+                added += 1
+        return added
+
+    def note(s: SliceReport) -> None:
+        report.slices.append(s)
+        if on_slice:
+            on_slice(s)
+
+    stack: list[tuple[Any, Any]] = []
+    try:
+        first = _first_page(fetch, q)
+        report.total_count = int(first.get("total_count", 0))
+        report.incomplete = bool(first.get("incomplete_results"))
+
+        if max_pages is not None:
+            paged = _page_through(fetch, q, first, min(max_pages, MAX_PAGES))
+            report.total_count = max(report.total_count, paged.total)
+            fetched = keep(paged.items)
+            report.sampled = report.total_count > len(paged.items)
+            note(
+                SliceReport(
+                    "", report.total_count, paged.pages, fetched, incomplete=report.incomplete
+                )
+            )
+            report.sum_of_slice_totals = report.total_count
+            return items
+
+        if report.total_count <= RESULT_CAP:
+            paged = _page_through(fetch, q, first, MAX_PAGES)
+            report.total_count = max(report.total_count, paged.total)
+            keep(paged.items)
+            if report.total_count <= RESULT_CAP and not paged.full_to_cap:
+                note(
+                    SliceReport(
+                        "",
+                        report.total_count,
+                        paged.pages,
+                        len(items),
+                        incomplete=report.incomplete,
+                    )
+                )
+                report.sum_of_slice_totals = report.total_count
+                return items
+            # The total grew past the cap while paging: slice after all.
+
+        report.sliced = True
+        if tail is not None:
+            stack.append(tail)
+        stack.append(whole_range)
+        while stack:
+            lo, hi = stack.pop()
+            label = qualifier(lo, hi)
+            sliced_q = f"{q} {label}"
+            page_one = _first_page(fetch, sliced_q)
+            total = int(page_one.get("total_count", 0))
+            incomplete = bool(page_one.get("incomplete_results"))
+            halves = split(lo, hi)
+            if total > RESULT_CAP and halves:
+                stack.append(halves[1])
+                stack.append(halves[0])
+                continue
+            if total == 0:
+                note(SliceReport(label, 0, 1, 0, incomplete=incomplete))
+                continue
+            paged = _page_through(fetch, sliced_q, page_one, MAX_PAGES)
+            fetched = keep(paged.items)
+            total = max(total, paged.total)
+            if (total > RESULT_CAP or paged.full_to_cap) and halves:
+                # It grew past the cap while paging: read the halves too (dedupe makes
+                # the overlap harmless).
+                stack.append(halves[1])
+                stack.append(halves[0])
+                continue
+            truncated = total > RESULT_CAP or paged.full_to_cap
+            report.sum_of_slice_totals += total
+            report.truncated_slices += int(truncated)
+            report.incomplete = report.incomplete or incomplete
+            note(
+                SliceReport(
+                    label, total, paged.pages, fetched, truncated=truncated, incomplete=incomplete
+                )
+            )
+    except BudgetExhausted:
+        report.budget_exhausted = True
+        report.incomplete = True
+        report.unvisited = [qualifier(lo, hi) for lo, hi in reversed(stack)]
+    return items
 
 
 def code_search(
@@ -141,114 +292,33 @@ def code_search(
     """
     report = QueryReport(id=query_id, q=q)
     budget = _Budget(MAX_REQUESTS_PER_QUERY)
-    seen: set[tuple[int, str]] = set()
-    items: list[dict] = []
 
-    def keep(batch: list[dict]) -> int:
-        added = 0
-        for item in batch:
-            key = (int(item["repository"]["id"]), item["path"])
-            if key not in seen:
-                seen.add(key)
-                items.append(item)
-                added += 1
-        return added
+    def split(lo: int, hi: int | None):
+        if hi is None or hi <= lo:
+            return None
+        mid = (lo + hi) // 2
+        return (lo, mid), (mid + 1, hi)
 
-    def note(slice_report: SliceReport) -> None:
-        report.slices.append(slice_report)
-        if on_slice:
-            on_slice(slice_report)
+    def qualifier(lo: int, hi: int | None) -> str:
+        return f"size:>={lo}" if hi is None else f"size:{lo}..{hi}"
 
-    first = _first_page(client, q, budget)
-    report.total_count = int(first.get("total_count", 0))
-    report.incomplete = bool(first.get("incomplete_results"))
-
-    if max_pages is not None or report.total_count <= RESULT_CAP:
-        limit = min(max_pages, MAX_PAGES) if max_pages is not None else MAX_PAGES
-        batch, pages = _page_through(client, q, first, budget, limit)
-        fetched = keep(batch)
-        report.sampled = max_pages is not None and report.total_count > len(batch)
-        note(SliceReport("", report.total_count, pages, fetched, incomplete=report.incomplete))
-        report.sum_of_slice_totals = report.total_count
-    else:
-        report.sliced = True
-        # Ranges are inclusive. The last one checks that nothing sits above the index limit.
-        stack: list[tuple[int, int | None]] = [
-            (MAX_INDEXED_BYTES, None),
-            (0, MAX_INDEXED_BYTES - 1),
-        ]
-        while stack:
-            lo, hi = stack.pop()
-            qualifier = f"size:>={lo}" if hi is None else f"size:{lo}..{hi}"
-            sliced_q = f"{q} {qualifier}"
-            page_one = _first_page(client, sliced_q, budget)
-            total = int(page_one.get("total_count", 0))
-            incomplete = bool(page_one.get("incomplete_results"))
-            can_split = hi is not None and hi > lo
-            if total > RESULT_CAP and can_split:
-                mid = (lo + hi) // 2
-                stack.append((mid + 1, hi))
-                stack.append((lo, mid))
-                continue
-            if total == 0:
-                note(SliceReport(qualifier, 0, 1, 0, incomplete=incomplete))
-                continue
-            batch, pages = _page_through(client, sliced_q, page_one, budget, MAX_PAGES)
-            fetched = keep(batch)
-            truncated = total > RESULT_CAP
-            report.sum_of_slice_totals += total
-            report.truncated_slices += int(truncated)
-            report.incomplete = report.incomplete or incomplete
-            note(
-                SliceReport(
-                    qualifier, total, pages, fetched, truncated=truncated, incomplete=incomplete
-                )
-            )
-
+    items = _search(
+        report,
+        _code_fetcher(client, budget),
+        q,
+        key=lambda i: (int(i["repository"]["id"]), i["path"]),
+        whole_range=(0, MAX_INDEXED_BYTES - 1),
+        split=split,
+        qualifier=qualifier,
+        # Ranges are inclusive. The tail checks that nothing sits above the index limit.
+        tail=(MAX_INDEXED_BYTES, None),
+        on_slice=on_slice,
+        max_pages=max_pages,
+    )
     report.files = len(items)
     report.repos = len({int(i["repository"]["id"]) for i in items})
     report.requests = budget.used
     return report, items
-
-
-# -- repository search ----------------------------------------------------------------
-
-FIRST_CREATED = dt.date(2008, 1, 1)  # GitHub's launch year; no repository is older.
-
-
-def _repo_fetch(client: GitHubClient, q: str, page: int, budget: _Budget) -> dict:
-    budget.spend(q)
-    resp = client.get(
-        "/search/repositories",
-        {"q": q, "per_page": PER_PAGE, "page": page, "sort": "stars", "order": "desc"},
-        bucket="search",
-    )
-    if resp.status != 200 or not isinstance(resp.data, dict):
-        message = (resp.data or {}).get("message", "") if isinstance(resp.data, dict) else ""
-        raise GitHubError(resp.status, resp.url, message or "repository search failed")
-    return resp.data
-
-
-def _repo_pages(
-    client: GitHubClient, q: str, first: dict, budget: _Budget
-) -> tuple[list[dict], int]:
-    items = list(first.get("items", []))
-    total = int(first.get("total_count", 0))
-    last_page = min(math.ceil(min(total, RESULT_CAP) / PER_PAGE), MAX_PAGES)
-    pages = 1
-    for page in range(2, last_page + 1):
-        try:
-            data = _repo_fetch(client, q, page, budget)
-        except GitHubError as exc:
-            if exc.status == 422:
-                break
-            raise
-        pages += 1
-        batch = data.get("items", [])
-        if not batch:
-            break
-        items.extend(batch)
-    return items, pages
 
 
 def repo_search(
@@ -262,59 +332,28 @@ def repo_search(
     """GET /search/repositories to completion, sliced by creation day (UTC) past the cap."""
     report = QueryReport(id=query_id, q=q, kind="repo")
     budget = _Budget(MAX_REQUESTS_PER_QUERY)
-    seen: set[int] = set()
-    items: list[dict] = []
 
-    def keep(batch: list[dict]) -> int:
-        added = 0
-        for item in batch:
-            rid = int(item["id"])
-            if rid not in seen:
-                seen.add(rid)
-                items.append(item)
-                added += 1
-        return added
+    def split(lo: dt.date, hi: dt.date):
+        if hi <= lo:
+            return None
+        mid = lo + (hi - lo) // 2
+        return (lo, mid), (mid + dt.timedelta(days=1), hi)
 
-    def note(s: SliceReport) -> None:
-        report.slices.append(s)
-        if on_slice:
-            on_slice(s)
+    def qualifier(lo: dt.date, hi: dt.date) -> str:
+        return f"created:{lo.isoformat()}..{hi.isoformat()}"
 
-    first = _repo_fetch(client, q, 1, budget)
-    report.total_count = int(first.get("total_count", 0))
-    report.incomplete = bool(first.get("incomplete_results"))
-    if report.total_count <= RESULT_CAP:
-        batch, pages = _repo_pages(client, q, first, budget)
-        note(SliceReport("", report.total_count, pages, keep(batch), incomplete=report.incomplete))
-        report.sum_of_slice_totals = report.total_count
-    else:
-        report.sliced = True
-        stack: list[tuple[dt.date, dt.date]] = [(FIRST_CREATED, today)]
-        while stack:
-            lo, hi = stack.pop()
-            qualifier = f"created:{lo.isoformat()}..{hi.isoformat()}"
-            sliced_q = f"{q} {qualifier}"
-            page_one = _repo_fetch(client, sliced_q, 1, budget)
-            total = int(page_one.get("total_count", 0))
-            incomplete = bool(page_one.get("incomplete_results"))
-            if total > RESULT_CAP and hi > lo:
-                mid = lo + (hi - lo) // 2
-                stack.append((mid + dt.timedelta(days=1), hi))
-                stack.append((lo, mid))
-                continue
-            if total == 0:
-                note(SliceReport(qualifier, 0, 1, 0, incomplete=incomplete))
-                continue
-            batch, pages = _repo_pages(client, sliced_q, page_one, budget)
-            truncated = total > RESULT_CAP
-            report.sum_of_slice_totals += total
-            report.truncated_slices += int(truncated)
-            report.incomplete = report.incomplete or incomplete
-            note(
-                SliceReport(
-                    qualifier, total, pages, keep(batch), truncated=truncated, incomplete=incomplete
-                )
-            )
+    items = _search(
+        report,
+        _repo_fetcher(client, budget),
+        q,
+        key=lambda i: int(i["id"]),
+        whole_range=(FIRST_CREATED, today),
+        split=split,
+        qualifier=qualifier,
+        tail=None,
+        on_slice=on_slice,
+        max_pages=None,
+    )
     report.files = len(items)
     report.repos = len(items)
     report.requests = budget.used

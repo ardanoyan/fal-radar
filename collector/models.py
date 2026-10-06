@@ -180,7 +180,12 @@ def extract_partner_ids(text: str, known: frozenset[str] | None = None) -> list[
         needle = f"{ns}/"
         while (i := lowered.find(needle, start)) != -1:
             start = i + 1
-            if i > 0 and (lowered[i - 1].isalnum() or lowered[i - 1] in "-_@./"):
+            prev = lowered[i - 1] if i > 0 else ""
+            if prev.isalnum() or (prev and prev in "-_@."):
+                continue
+            # After a slash only as a fal URL path (queue.fal.run/<ns>/..., fal.ai/models/<ns>/...),
+            # never as a repository path or as part of a fal-ai/ ID.
+            if prev == "/" and not lowered[:i].endswith(("fal.run/", "fal.ai/models/")):
                 continue
             m = _ID_CHARS.match(lowered, i)
             candidate = _URL_SUFFIX.sub("", m.group(0).rstrip(_TRAILING)) if m else ""

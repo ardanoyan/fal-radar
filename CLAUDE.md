@@ -85,16 +85,18 @@ Wording on the site: "models seen in code, at least".
 
 ### 3.4 Enrichment
 
-`GET /repos/{owner}/{repo}` for every repo, `GET /users/{login}` for every owner, with ETags sent as `If-None-Match` (an authorised 304 does not count against the primary limit; pacing stays the same because secondary limits still count requests). A renamed or transferred repo is followed by redirect and keyed by its numeric id. A repo that answers 404, 403 or 451 is recorded as gone and skipped in later runs unless a search finds it again.
+`GET /repos/{owner}/{repo}` for every repo, `GET /users/{login}` for every owner, with ETags sent as `If-None-Match` (an authorised 304 does not count against the primary limit; pacing stays the same because secondary limits still count requests). A renamed or transferred repo is followed by redirect and keyed by its numeric id. A repo that answers 404, 403 or 451 is recorded as gone and skipped in later runs unless a search finds it again (then it is looked up once more). If a name now answers with a different repository id, the old record is kept and nothing is copied to the other repository.
+Saved ETags are sent only for lookups that may come back as a 304 without a body: repos already in `repos.json` and owners we already hold. `data/etags.json` keeps only those URLs. Manifests and READMEs are fetched in full.
 
 ### 3.5 Classification (heuristics, no LLM)
 
 - `clients`: js, python, swift, kotlin, dart, http, integration.
 - `models`: families from endpoint IDs in text-match fragments.
 - `kind`: template, fork (fork and under 25 stars), app, library, bot, plugin, research.
-- `stack`: next, react, vue, svelte, remix, expo, flutter, fastapi, django, flask, gradio, streamlit, comfyui, n8n, from topics and from one manifest per repo (the preferred manifest among its code-search hits: package.json, then pyproject.toml, requirements.txt, pubspec.yaml; shallowest path first). The same manifest decides `bot` (discord.js, telegraf, python-telegram-bot, slack bolt and similar) and `library` (a package with main or exports, not private, no app framework; or a pyproject package with no entry point and no web framework).
+- `stack`: next, react, vue, svelte, remix, expo, flutter, fastapi, django, flask, gradio, streamlit, comfyui, n8n, from topics and from one manifest per repo (the preferred manifest among its code-search hits: package.json, then pyproject.toml, requirements.txt, pubspec.yaml; shallowest path first). The same manifest decides `bot` (discord.js, discord.py, telegraf, python-telegram-bot, slack bolt and similar; Python names compared after PEP 503 normalisation) and `library` (a package.json that publishes something, through exports, module, types or files, or a main with no start or dev script, that is not private and has no app framework; or a pyproject with a build system, no entry point and no web framework). The labels are stored, so a run that reads no manifest keeps them.
 - `active`: pushed in the last 90 days.
-- `notable`: not a fork, not a template, has a description, and 3 or more stars or pushed in the last 30 days with a README over 500 bytes. The README size is looked up only for repos where it decides the answer.
+- `notable`: not a fork, not a template, has a description, and 3 or more stars or pushed in the last 30 days with a README over 500 bytes. The README size is looked up only for repos where it decides the answer, and never for mention-only repos (they also get no owner lookup).
+- Documentation, counted as a mention: Markdown, reStructuredText, AsciiDoc, `.mdc`, `.txt` (except `requirements*` and `constraints*`), any file named README, CHANGELOG or llms*, and AI assistant rule files (`.cursorrules`, `.cursor/`, `.windsurf/`, `.clinerules`, `.github/instructions/`, `.github/prompts/`).
 - Scoped searches also record which clients a repo shows; a manifest literal counts only inside its own file name (Dart's `fal_client` only in pubspec.yaml).
 
 ### 3.6 Snapshots, deltas, "this week"
@@ -110,7 +112,9 @@ Wording on the site: "models seen in code, at least".
 - `data/submissions.json` holds repos added from the "Add a project" issue template after review.
 - Every response is cached under `collector/.cache/` (gzipped, git-ignored, keyed by URL). `--offline` builds from cache; `--resume` continues the last unfinished run, replaying what it already fetched.
 - Rate limits: Retry-After plus 5 seconds; a spent primary limit waits for `x-ratelimit-reset`; a secondary limit without headers backs off from one minute, doubling. Requests are serial.
-- `data/` is written only when a run finishes, atomically. A failed run exits non-zero and leaves `data/` as it was.
+- `data/` is written only when a run finishes, atomically. A failed run exits non-zero and leaves `data/` as it was. A run refuses to start with less than 1 GB free.
+- A limited run (`--only`, `--limit-repos`, any `--skip-*`) writes `runs/<date>.limited.json`, no snapshot, keeps last week's mentions when it ran no repository search, and never counts for `--resume`, which continues the newest unfinished full run.
+- A scoped search that fails for one repo is logged and skipped; a query that reaches its request budget stops and lists the slices it did not read.
 
 ### 3.8 Schema (`data/repos.json`)
 
