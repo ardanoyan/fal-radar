@@ -1,0 +1,22 @@
+{
+  "note": "Figures read by hand from public pages, with the date they were read. They are not produced by the collector and are not comparable with its counts.",
+  "items": [
+    {
+      "id": "github-dependents",
+      "label": "Repositories GitHub's dependency graph lists as depending on @fal-ai/client",
+      "value": 3808,
+      "also": "and 165 packages",
+      "source": "https://github.com/fal-ai/fal-js/network/dependents",
+      "read_on": "2026-10-05",
+      "caveat": "GitHub's page counts forks and repos outside the code search index; the API cannot reproduce it."
+    },
+    {
+      "id": "npm-downloads",
+      "label": "npm downloads of @fal-ai/client in the previous 30 days",
+      "value": 6236900,
+      "source": "https://api.npmjs.org/downloads/point/last-month/@fal-ai/client",
+      "read_on": "2026-10-05",
+      "caveat": "Downloads include CI runs and installs, not projects."
+    }
+  ]
+}

@@ -1,0 +1,176 @@
+{
+ "data_date": "2026-10-06",
+ "first_issue": true,
+ "new": {
+  "days": 14,
+  "count": 35,
+  "repos": [
+   {
+    "full_name": "ilkerzg/storycast",
+    "url": "https://github.com/ilkerzg/storycast",
+    "description": "Type a topic. Get a story.",
+    "stars": 229,
+    "models": [],
+    "created_at": "2026-09-24",
+    "pushed_at": "2026-09-25"
+   },
+   {
+    "full_name": "mikhailsychevbytebytego/cattube",
+    "url": "https://github.com/mikhailsychevbytebytego/cattube",
+    "description": null,
+    "stars": 17,
+    "models": [],
+    "created_at": "2026-09-22",
+    "pushed_at": "2026-09-26"
+   },
+   {
+    "full_name": "Openpod/impractical-video",
+    "url": "https://github.com/Openpod/impractical-video",
+    "description": "An open-source canvas for working creating, editing and shipping ai video projects",
+    "stars": 3,
+    "models": [],
+    "created_at": "2026-09-24",
+    "pushed_at": "2026-09-29"
+   },
+   {
+    "full_name": "prayushkale/magic-pencil-app",
+    "url": "https://github.com/prayushkale/magic-pencil-app",
+    "description": "Draw a sketch, press Imagine, and it becomes a real image or video.",
+    "stars": 1,
+    "models": [],
+    "created_at": "2026-10-02",
+    "pushed_at": "2026-10-04"
+   },
+   {
+    "full_name": "88shokan/FitMe",
+    "url": "https://github.com/88shokan/FitMe",
+    "description": "Cut online apparel returns by showing shoppers an AI try-on of the garment on themselves, plus a size recommendation. Temple Owl Hacks, sustainability track.",
+    "stars": 0,
+    "models": [],
+    "created_at": "2026-09-26",
+    "pushed_at": "2026-09-27"
+   },
+   {
+    "full_name": "akotsampaseris/word-of-the-day",
+    "url": "https://github.com/akotsampaseris/word-of-the-day",
+    "description": "Small project that generates a word of the day graphics and stories.",
+    "stars": 0,
+    "models": [],
+    "created_at": "2026-09-29",
+    "pushed_at": "2026-09-29"
+   },
+   {
+    "full_name": "AndiiCodes/AI-Canva",
+    "url": "https://github.com/AndiiCodes/AI-Canva",
+    "description": null,
+    "stars": 0,
+    "models": [],
+    "created_at": "2026-09-28",
+    "pushed_at": "2026-09-29"
+   },
+   {
+    "full_name": "botfusions/botsweb",
+    "url": "https://github.com/botfusions/botsweb",
+    "description": null,
+    "stars": 0,
+    "models": [],
+    "created_at": "2026-09-30",
+    "pushed_at": "2026-09-30"
+   }
+  ]
+ },
+ "most_starred": {
+  "days": 90,
+  "repos": [
+   {
+    "full_name": "0xsline/OpenChatCut",
+    "url": "https://github.com/0xsline/OpenChatCut",
+    "description": "Open-source, local-first conversational AI video editor with a professional multi-track timeline, Agent Skills, MCP integration, and Remotion rendering.",
+    "stars": 2145,
+    "models": [],
+    "created_at": "2026-07-15",
+    "pushed_at": "2026-10-05"
+   },
+   {
+    "full_name": "ItusiAI/Open-Magiviz",
+    "url": "https://github.com/ItusiAI/Open-Magiviz",
+    "description": "Magiviz：开源的 AI 视频创作引擎，把一整个剧组交给每一个开发者与创作者",
+    "stars": 605,
+    "models": [],
+    "created_at": "2026-08-09",
+    "pushed_at": "2026-09-04"
+   },
+   {
+    "full_name": "BuzzPlay/infinite-world",
+    "url": "https://github.com/BuzzPlay/infinite-world",
+    "description": "An open-source system for building persistent worlds with multimodal AI.",
+    "stars": 388,
+    "models": [],
+    "created_at": "2026-09-04",
+    "pushed_at": "2026-09-29"
+   },
+   {
+    "full_name": "blendi-remade/interdimensional-game",
+    "url": "https://github.com/blendi-remade/interdimensional-game",
+    "description": "Create your own adventure with realtime video!",
+    "stars": 250,
+    "models": [],
+    "created_at": "2026-08-31",
+    "pushed_at": "2026-09-04"
+   },
+   {
+    "full_name": "ilkerzg/storycast",
+    "url": "https://github.com/ilkerzg/storycast",
+    "description": "Type a topic. Get a story.",
+    "stars": 229,
+    "models": [],
+    "created_at": "2026-09-24",
+    "pushed_at": "2026-09-25"
+   }
+  ]
+ },
+ "models": {
+  "from": "2026-09-30",
+  "to": "2026-10-06",
+  "count": 14,
+  "catalogue_read_on": "2026-10-06",
+  "endpoints": [
+   {
+    "id": "fal-ai/kandinsky6-vsr/lite",
+    "name": "Kandinsky 6.0 VSR",
+    "category": "video-to-video",
+    "created": "2026-10-05"
+   },
+   {
+    "id": "fal-ai/kandinsky6-pro/text-to-video",
+    "name": "Kandinsky 6.0 Pro",
+    "category": "text-to-video",
+    "created": "2026-10-05"
+   },
+   {
+    "id": "fal-ai/kandinsky6-pro/image-to-video",
+    "name": "Kandinsky 6.0 Pro",
+    "category": "image-to-video",
+    "created": "2026-10-05"
+   },
+   {
+    "id": "fal-ai/kandinsky6-lite/text-to-video",
+    "name": "Kandinsky 6.0 Lite",
+    "category": "text-to-video",
+    "created": "2026-10-05"
+   },
+   {
+    "id": "fal-ai/kandinsky6-lite/image-to-video",
+    "name": "Kandinsky 6.0 Lite",
+    "category": "image-to-video",
+    "created": "2026-10-05"
+   },
+   {
+    "id": "fal-ai/marigold-v2",
+    "name": "Marigold V2 Depth",
+    "category": "image-to-image",
+    "created": "2026-10-02"
+   }
+  ]
+ }
+}

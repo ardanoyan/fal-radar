@@ -1,0 +1,166 @@
+{
+ "data_date": "2026-10-06",
+ "rule": "owners other than fal with a repo of 20+ stars pushed in the last 90 days, no forks or templates, ranked by the stars of their best fal repo",
+ "builders": [
+  {
+   "login": "lobehub",
+   "name": null,
+   "type": "Organization",
+   "profile_url": "https://github.com/lobehub",
+   "avatar_url": "https://avatars.githubusercontent.com/u/131470832?v=4",
+   "repos": 1,
+   "best": {
+    "full_name": "lobehub/lobehub",
+    "url": "https://github.com/lobehub/lobehub",
+    "description": "🤯 LobeHub is your Chief Agent Operator, organizing your agents into 7×24 operations by hiring, scheduling, and reporting on your entire AI team.",
+    "stars": 83017,
+    "models": [],
+    "pushed_at": "2026-10-06T13:19:00Z"
+   }
+  },
+  {
+   "login": "promptfoo",
+   "name": null,
+   "type": "Organization",
+   "profile_url": "https://github.com/promptfoo",
+   "avatar_url": "https://avatars.githubusercontent.com/u/137907881?v=4",
+   "repos": 1,
+   "best": {
+    "full_name": "promptfoo/promptfoo",
+    "url": "https://github.com/promptfoo/promptfoo",
+    "description": "Test your prompts, agents, and RAGs. Red teaming/pentesting/vulnerability scanning for AI. Compare performance of GPT, Claude, Gemini, DeepSeek, and more....",
+    "stars": 25745,
+    "models": [],
+    "pushed_at": "2026-10-06T11:59:08Z"
+   }
+  },
+  {
+   "login": "elizaOS",
+   "name": null,
+   "type": "Organization",
+   "profile_url": "https://github.com/elizaOS",
+   "avatar_url": "https://avatars.githubusercontent.com/u/186240462?v=4",
+   "repos": 1,
+   "best": {
+    "full_name": "elizaOS/eliza",
+    "url": "https://github.com/elizaOS/eliza",
+    "description": "Open source agentic operating system",
+    "stars": 19546,
+    "models": [],
+    "pushed_at": "2026-10-06T11:13:09Z"
+   }
+  },
+  {
+   "login": "refly-ai",
+   "name": null,
+   "type": "Organization",
+   "profile_url": "https://github.com/refly-ai",
+   "avatar_url": "https://avatars.githubusercontent.com/u/132635806?v=4",
+   "repos": 1,
+   "best": {
+    "full_name": "refly-ai/refly",
+    "url": "https://github.com/refly-ai/refly",
+    "description": "The first open-source agent skills builder. Define skills by vibe workflow, run on Claude Code, Cursor, Codex & more. Build Clawdbot 🦞· APIs for Lovable · Bots...",
+    "stars": 7532,
+    "models": [],
+    "pushed_at": "2026-07-29T05:25:23Z"
+   }
+  },
+  {
+   "login": "Adam-CAD",
+   "name": null,
+   "type": "Organization",
+   "profile_url": "https://github.com/Adam-CAD",
+   "avatar_url": "https://avatars.githubusercontent.com/u/193529322?v=4",
+   "repos": 1,
+   "best": {
+    "full_name": "Adam-CAD/CADAM",
+    "url": "https://github.com/Adam-CAD/CADAM",
+    "description": "CADAM is the open source text-to-CAD web application",
+    "stars": 5214,
+    "models": [],
+    "pushed_at": "2026-10-06T05:57:18Z"
+   }
+  },
+  {
+   "login": "CookSleep",
+   "name": null,
+   "type": "User",
+   "profile_url": "https://github.com/CookSleep",
+   "avatar_url": "https://avatars.githubusercontent.com/u/151028412?v=4",
+   "repos": 1,
+   "best": {
+    "full_name": "CookSleep/gpt_image_playground",
+    "url": "https://github.com/CookSleep/gpt_image_playground",
+    "description": "基于 OpenAI gpt-image-2.5 API 的图片生成与编辑工具",
+    "stars": 3829,
+    "models": [],
+    "pushed_at": "2026-10-06T13:11:46Z"
+   }
+  },
+  {
+   "login": "TanStack",
+   "name": null,
+   "type": "Organization",
+   "profile_url": "https://github.com/TanStack",
+   "avatar_url": "https://avatars.githubusercontent.com/u/72518640?v=4",
+   "repos": 1,
+   "best": {
+    "full_name": "TanStack/ai",
+    "url": "https://github.com/TanStack/ai",
+    "description": "🤖 Type-safe, provider-agnostic TypeScript AI SDK for streaming chat, tool calling, agents, and multimodal apps across OpenAI, Anthropic, Gemini, React, Vue...",
+    "stars": 3167,
+    "models": [],
+    "pushed_at": "2026-10-06T13:15:15Z"
+   }
+  },
+  {
+   "login": "huangserva",
+   "name": null,
+   "type": "User",
+   "profile_url": "https://github.com/huangserva",
+   "avatar_url": "https://avatars.githubusercontent.com/u/201197786?v=4",
+   "repos": 1,
+   "best": {
+    "full_name": "huangserva/3DCellForge",
+    "url": "https://github.com/huangserva/3DCellForge",
+    "description": "AI-powered interactive 3D model generation, inspection, and presentation studio.",
+    "stars": 2647,
+    "models": [],
+    "pushed_at": "2026-08-27T23:10:25Z"
+   }
+  },
+  {
+   "login": "0xsline",
+   "name": null,
+   "type": "User",
+   "profile_url": "https://github.com/0xsline",
+   "avatar_url": "https://avatars.githubusercontent.com/u/151105947?v=4",
+   "repos": 1,
+   "best": {
+    "full_name": "0xsline/OpenChatCut",
+    "url": "https://github.com/0xsline/OpenChatCut",
+    "description": "Open-source, local-first conversational AI video editor with a professional multi-track timeline, Agent Skills, MCP integration, and Remotion rendering.",
+    "stars": 2145,
+    "models": [],
+    "pushed_at": "2026-10-05T13:45:36Z"
+   }
+  },
+  {
+   "login": "blendi-remade",
+   "name": null,
+   "type": "User",
+   "profile_url": "https://github.com/blendi-remade",
+   "avatar_url": "https://avatars.githubusercontent.com/u/173838289?v=4",
+   "repos": 13,
+   "best": {
+    "full_name": "blendi-remade/sprite-sheet-creator",
+    "url": "https://github.com/blendi-remade/sprite-sheet-creator",
+    "description": "Create your own playable 2D characters and maps, powered by fal.ai",
+    "stars": 1764,
+    "models": [],
+    "pushed_at": "2026-07-01T21:25:20Z"
+   }
+  }
+ ]
+}

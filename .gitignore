@@ -23,3 +23,6 @@ site/playwright-report/
 notes/
 
 .DS_Store
+site/public/data/
+site/next-env.d.ts
+site/tsconfig.tsbuildinfo

@@ -1,0 +1,52 @@
+{
+ "data_date": "2026-10-06",
+ "run_id": "2026-10-06",
+ "partial": false,
+ "queries_run": [
+  "js-client"
+ ],
+ "queries_total": 137,
+ "headline": 2092,
+ "builders": 1868,
+ "notable": 219,
+ "active": 659,
+ "mentions": 0,
+ "from_fal": 10,
+ "from_fal_repos": [
+  "fal-ai-community/fal-banana",
+  "fal-ai-community/fal-demos",
+  "fal-ai-community/genmedia-cli",
+  "fal-ai-community/infinite-kanvas",
+  "fal-ai-community/realtime-krea-wan",
+  "fal-ai-community/skills",
+  "fal-ai-community/smart-crop",
+  "fal-ai-community/video-generator-demo",
+  "fal-ai-community/video-starter-kit",
+  "fal-ai/fal-js"
+ ],
+ "coverage": [
+  {
+   "id": "js-client",
+   "kind": "code",
+   "q": "\"@fal-ai/client\" filename:package.json",
+   "total_count": 2132,
+   "sum_of_slice_totals": 2274,
+   "slices": 11,
+   "truncated_slices": 0,
+   "sampled": false,
+   "incomplete": false,
+   "files": 2223,
+   "literal_match": 2222,
+   "dropped": 1,
+   "in_docs": 0,
+   "repos": 2102,
+   "requests": 40
+  }
+ ],
+ "api_facts": [
+  "GitHub's REST search finds up to 4,000 matching repositories per search and returns results from those, so totals are lower bounds.",
+  "Search responses carry no ETag, so conditional requests cannot save search quota; data/etags.json covers repository and user lookups only.",
+  "The REST code search uses the legacy index: default branch only, files under 384 KB, repositories active in the last year, no archived repositories, forks only with more stars than their parent.",
+  "Punctuation is ignored in code search phrases, so each hit is checked against the literal string in its text-match fragments."
+ ]
+}

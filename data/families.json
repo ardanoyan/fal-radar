@@ -1,0 +1,979 @@
+{
+ "data_date": "2026-10-06",
+ "repos_with_model": 0,
+ "repos": 2092,
+ "families": [
+  {
+   "id": "ace-step",
+   "name": "ACE-Step",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/ace-step/prompt-to-audio",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "ai-avatar",
+   "name": "AI Avatar",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/ai-avatar/single-text",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "animatediff",
+   "name": "AnimateDiff",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/fast-animatediff/text-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "any-llm",
+   "name": "Any LLM",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/any-llm",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "aura-flow",
+   "name": "AuraFlow",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/aura-flow",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "aura-sr",
+   "name": "AuraSR",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/aura-sr",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "bagel",
+   "name": "Bagel",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/bagel",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "bernini-r",
+   "name": "Bernini-R Edit Image",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/bernini-r/edit-image",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "birefnet",
+   "name": "BiRefNet background removal",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/birefnet",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "bria",
+   "name": "Bria",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/bria/background/remove",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "bytedance",
+   "name": "Bytedance Upscaler Upscale Video",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/bytedance-upscaler/upscale/video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "ccsr",
+   "name": "CCSR upscaler",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/ccsr",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "chatterbox",
+   "name": "Chatterbox",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/chatterbox/text-to-speech",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "chrono-edit",
+   "name": "Chrono Edit",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/chrono-edit",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "clarity-upscaler",
+   "name": "Clarity Upscaler",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/clarity-upscaler",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "cogvideox",
+   "name": "CogVideoX",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/cogvideox-5b",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "cosmos-predict-2.5",
+   "name": "Cosmos Predict 2.5 2B",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/cosmos-predict-2.5/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "creatify",
+   "name": "Creatify Aurora",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/creatify/aurora",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "creative-upscaler",
+   "name": "Creative Upscaler",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/creative-upscaler",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "dia-tts",
+   "name": "Dia TTS",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/dia-tts/voice-clone",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "elevenlabs",
+   "name": "ElevenLabs",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/elevenlabs/tts/eleven-v3",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "ernie-image",
+   "name": "Ernie Image",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/ernie-image",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "esrgan",
+   "name": "ESRGAN upscaler",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/esrgan",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "f5-tts",
+   "name": "F5 TTS",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/f5-tts",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "face-swap",
+   "name": "Face swap",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/face-swap",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "fashn",
+   "name": "FASHN try-on",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/fashn/tryon/v1.5",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "ffmpeg-api",
+   "name": "FFmpeg API",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/ffmpeg-api/compose",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "finegrain-eraser",
+   "name": "Finegrain Eraser",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/finegrain-eraser",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "florence-2",
+   "name": "Florence-2",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/florence-2-large/caption",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "flux",
+   "name": "FLUX",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/flux/schnell",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "flux-training",
+   "name": "FLUX LoRA training",
+   "media": "training",
+   "url": "https://fal.ai/models/fal-ai/flux-lora-fast-training",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "framepack",
+   "name": "Framepack",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/framepack",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "gemini",
+   "name": "Gemini",
+   "media": "multi",
+   "url": "https://fal.ai/models/fal-ai/gemini-3.1-flash-tts",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "gpt-image",
+   "name": "GPT Image",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/gpt-image-1-mini",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "heygen",
+   "name": "HeyGen",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/heygen/avatar5/digital-twin",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "hidream",
+   "name": "HiDream",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/hidream-i1-dev",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "hunyuan-image",
+   "name": "Hunyuan Image",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/hunyuan-image/v2.1/text-to-image",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "hunyuan-motion",
+   "name": "Hunyuan Motion [1B]",
+   "media": "3d",
+   "url": "https://fal.ai/models/fal-ai/hunyuan-motion",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "hunyuan-video",
+   "name": "Hunyuan Video",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/hunyuan-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "hunyuan3d",
+   "name": "Hunyuan3D",
+   "media": "3d",
+   "url": "https://fal.ai/models/fal-ai/hunyuan3d-v3/image-to-3d",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "hyper3d",
+   "name": "Hyper3D Rodin",
+   "media": "3d",
+   "url": "https://fal.ai/models/fal-ai/hyper3d/rodin/v2.5",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "ideogram",
+   "name": "Ideogram",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/ideogram/remove-background",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "image-editing",
+   "name": "Image editing apps",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/image-editing/age-progression",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "image-preprocessors",
+   "name": "Image Preprocessors",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/image-preprocessors/hed",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "imageutils",
+   "name": "Image utilities",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/imageutils/rembg",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "infinitalk",
+   "name": "Infinitalk",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/infinitalk",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "inworld-tts",
+   "name": "Inworld TTS-1.5 Max",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/inworld-tts",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "kandinsky5",
+   "name": "Kandinsky5 Pro",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/kandinsky5-pro/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "kling",
+   "name": "Kling",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "kokoro",
+   "name": "Kokoro",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/kokoro/american-english",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "kolors",
+   "name": "Kolors",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/kolors",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "krea",
+   "name": "Krea",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/krea-2-trainer",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "leffa",
+   "name": "Leffa Virtual TryOn",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/leffa/virtual-tryon",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "live-portrait",
+   "name": "Live Portrait",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/live-portrait",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "llava",
+   "name": "LLaVA",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/llava-next",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "longcat",
+   "name": "LongCat",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/longcat-image",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "ltx-training",
+   "name": "LTX training",
+   "media": "training",
+   "url": "https://fal.ai/models/fal-ai/ltx23-v2v-trainer",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "ltx",
+   "name": "LTX Video",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/ltx-video-13b-distilled/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "luma",
+   "name": "Luma",
+   "media": "multi",
+   "url": "https://fal.ai/models/fal-ai/luma-photon",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "lyria",
+   "name": "Lyria",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/lyria3",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "magi-distilled",
+   "name": "MAGI-1 (Distilled)",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/magi-distilled",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "marigold-v2",
+   "name": "Marigold V2 Depth",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/marigold-v2",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "maya",
+   "name": "Maya1",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/maya",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "meshy",
+   "name": "Meshy",
+   "media": "3d",
+   "url": "https://fal.ai/models/fal-ai/meshy/v6-preview/image-to-3d",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "minimax",
+   "name": "MiniMax",
+   "media": "multi",
+   "url": "https://fal.ai/models/fal-ai/minimax/speech-02-hd",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "mmaudio",
+   "name": "MMAudio",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/mmaudio-v2",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "mochi",
+   "name": "Mochi",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/mochi-v1",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "moondream",
+   "name": "Moondream",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/moondream-next",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "nano-banana",
+   "name": "Nano Banana",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/nano-banana-2",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "x-ailab",
+   "name": "NSFW Checker",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/x-ailab/nsfw",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "object-removal",
+   "name": "Object Removal",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/object-removal",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "omnigen",
+   "name": "OmniGen",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/omnigen-v1",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "omnihuman",
+   "name": "OmniHuman",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/bytedance/omnihuman/v1.5",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "omnilottie",
+   "name": "Omnilottie",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/omnilottie",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "patina",
+   "name": "PATINA",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/patina",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "phota",
+   "name": "Phota Text to Image",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/phota",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "pika",
+   "name": "Pika",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/pika/v2.1/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "pixverse",
+   "name": "PixVerse",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/pixverse/v6/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "playground",
+   "name": "Playground v2.5",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/playground-v25",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "post-processing",
+   "name": "Post Processing",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/post-processing",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "pulid",
+   "name": "PuLID",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/pulid",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "qwen-image",
+   "name": "Qwen Image",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/qwen-image",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "qwen-tts",
+   "name": "Qwen TTS",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/qwen-3-tts/text-to-speech/1.7b",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "recraft",
+   "name": "Recraft",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/recraft/v4/pro/text-to-image",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "runway",
+   "name": "Runway",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/runway-gen3/turbo/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "sa2va",
+   "name": "Sa2VA 4B Image",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/sa2va/4b/image",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "sadtalker",
+   "name": "SadTalker",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/sadtalker",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "sana",
+   "name": "Sana",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/sana",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "sdxl",
+   "name": "SDXL",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/fast-sdxl",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "seedance",
+   "name": "Seedance",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/bytedance/seedance/v1.5/pro/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "seedream",
+   "name": "Seedream",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/bytedance/seedream/v4/edit",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "seedvr",
+   "name": "SeedVR",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/seedvr/upscale/image",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "sam",
+   "name": "Segment Anything",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/sam-3/3d-objects",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "sora",
+   "name": "Sora",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/sora-2/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "stable-audio",
+   "name": "Stable Audio",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/stable-audio",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "stable-diffusion",
+   "name": "Stable Diffusion",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/stable-diffusion-v15",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "stable-video",
+   "name": "Stable Video Diffusion",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/stable-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "sync-lipsync",
+   "name": "Sync Lipsync",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/sync-lipsync/v2",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "trellis",
+   "name": "TRELLIS",
+   "media": "3d",
+   "url": "https://fal.ai/models/fal-ai/trellis",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "tripo",
+   "name": "Tripo",
+   "media": "3d",
+   "url": "https://fal.ai/models/fal-ai/triposr",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "veo",
+   "name": "Veo",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/veo3.1",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "vibevoice",
+   "name": "VibeVoice 1.5B",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/vibevoice",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "vidu",
+   "name": "Vidu",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/vidu/image-to-video",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "wan",
+   "name": "Wan",
+   "media": "video",
+   "url": "https://fal.ai/models/fal-ai/wan-effects",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "wan-training",
+   "name": "Wan LoRA training",
+   "media": "training",
+   "url": "https://fal.ai/models/fal-ai/wan-trainer/t2v-14b",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "whisper",
+   "name": "Whisper and speech to text",
+   "media": "audio",
+   "url": "https://fal.ai/models/fal-ai/whisper",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "workflow-utilities",
+   "name": "Workflow utilities",
+   "media": "utility",
+   "url": "https://fal.ai/models/fal-ai/workflow-utilities/audio-compressor",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  },
+  {
+   "id": "z-image",
+   "name": "Z-Image",
+   "media": "image",
+   "url": "https://fal.ai/models/fal-ai/z-image-trainer",
+   "repos": 0,
+   "files": null,
+   "files_sampled": null
+  }
+ ]
+}

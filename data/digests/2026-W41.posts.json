@@ -1,0 +1,30 @@
+{
+ "week": "2026-W41",
+ "data_date": "2026-10-06",
+ "discord": "**Built on fal, week 41: 2,092 public GitHub repos with fal in the code, from 1,868 builders (data 2026-10-06).**\n\nFirst issue: week-over-week numbers start next week.\n\n**New, created in the last 14 days**\n- [ilkerzg/storycast](https://github.com/ilkerzg/storycast) - Type a topic. Get a story. (229 stars)\n- [mikhailsychevbytebytego/cattube](https://github.com/mikhailsychevbytebytego/cattube) (17 stars)\n- [Openpod/impractical-video](https://github.com/Openpod/impractical-video) - An open-source canvas for working creating, editing and shipping ai video projects (3 stars)\n- [prayushkale/magic-pencil-app](https://github.com/prayushkale/magic-pencil-app) - Draw a sketch, press Imagine, and it becomes a real image or video. (1 star)\n- [88shokan/FitMe](https://github.com/88shokan/FitMe) - Cut online apparel returns by showing shoppers an AI try-on of the garment on themselves, plus a size recommendation. Temple Owl Hacks, sustainability track. (0 stars)\n\n**Most starred, created in the last 90 days**\n- [0xsline/OpenChatCut](https://github.com/0xsline/OpenChatCut) - Open-source, local-first conversational AI video editor with a professional multi-track timeline, Agent Skills, MCP integration, and Remotion rendering. (2,145 stars)\n- [ItusiAI/Open-Magiviz](https://github.com/ItusiAI/Open-Magiviz) - Magiviz：开源的 AI 视频创作引擎，把一整个剧组交给每一个开发者与创作者 (605 stars)\n- [BuzzPlay/infinite-world](https://github.com/BuzzPlay/infinite-world) - An open-source system for building persistent worlds with multimodal AI. (388 stars)\n\n**Models this week:** fal's catalogue lists 14 endpoints created 2026-09-30 to 2026-10-06.\n\nfal radar, an unofficial community project: https://fal-radar.vercel.app",
+ "x": [
+  "Built on fal, week 41: 2,092 public GitHub repos with fal in the code, from 1,868 builders (data 2026-10-06). A thread:",
+  "New: ilkerzg/storycast, 229 stars. https://github.com/ilkerzg/storycast",
+  "New: mikhailsychevbytebytego/cattube, 17 stars. https://github.com/mikhailsychevbytebytego/cattube",
+  "New: Openpod/impractical-video, 3 stars. https://github.com/Openpod/impractical-video",
+  "Most starred of the last 90 days: 0xsline/OpenChatCut, 2,145 stars. https://github.com/0xsline/OpenChatCut",
+  "Most starred of the last 90 days: ItusiAI/Open-Magiviz, 605 stars. https://github.com/ItusiAI/Open-Magiviz",
+  "fal's catalogue lists 14 endpoints created 2026-09-30 to 2026-10-06.",
+  "fal radar, an unofficial community project: https://fal-radar.vercel.app"
+ ],
+ "linkedin": "Built on fal, week 41: 2,092 public GitHub repos with fal in the code, from 1,868 builders (data 2026-10-06).\n\nThis is the first issue of a weekly map of what people build on fal.\n\nNew this fortnight: ilkerzg/storycast (229 stars); mikhailsychevbytebytego/cattube (17 stars); Openpod/impractical-video (3 stars).\nMost starred of the last 90 days: 0xsline/OpenChatCut (2,145 stars); ItusiAI/Open-Magiviz (605 stars); BuzzPlay/infinite-world (388 stars).\nA builder to know: blendi-remade, blendi-remade/sprite-sheet-creator (1,764 stars).\n\nfal radar, an unofficial community project: https://fal-radar.vercel.app",
+ "lengths": {
+  "discord": 1687,
+  "x": [
+   119,
+   71,
+   98,
+   85,
+   106,
+   106,
+   68,
+   72
+  ],
+  "linkedin": 610
+ }
+}

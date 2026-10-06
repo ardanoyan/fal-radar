@@ -1,0 +1,21 @@
+name: Remove my project or profile
+description: Ask for a repository or a whole profile to be removed from fal radar.
+title: "Remove: "
+labels: ["removal"]
+body:
+  - type: markdown
+    attributes:
+      value: fal radar stores only what GitHub shows publicly. Removals are applied before the next weekly run.
+  - type: input
+    id: target
+    attributes:
+      label: Repository (owner/name) or profile (login) to remove
+    validations:
+      required: true
+  - type: checkboxes
+    id: owner
+    attributes:
+      label: Confirmation
+      options:
+        - label: I own this repository or profile, or I maintain it.
+          required: true

@@ -1,0 +1,16 @@
+name: Add a project
+description: Suggest a public repository built on fal that the radar missed.
+title: "Add: "
+labels: ["submission"]
+body:
+  - type: input
+    id: repo
+    attributes:
+      label: Repository (owner/name)
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: Where does it use fal?
+      description: A file path or a line, so the evidence can be checked.

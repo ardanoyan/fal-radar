@@ -81,6 +81,29 @@ def run(
     _print_summary(summary)
 
 
+@app.command("site-data")
+def site_data_cmd() -> None:
+    """Write findings.json, builders.json, this_week.json and site.json from data/."""
+    from . import site_data
+
+    out = site_data.write_all()
+    for f in out["findings.json"]["findings"]:
+        typer.echo(f"finding {f['id']}: {f['text']}")
+    for b in out["builders.json"]["builders"]:
+        typer.echo(f"builder {b['login']}: {b['best']['full_name']} {b['best']['stars']}")
+
+
+@app.command()
+def digest(
+    week: Annotated[str | None, typer.Option("--week", help="ISO week, e.g. 2026-W41.")] = None,
+) -> None:
+    """Write data/digests/<week>.md and <week>.posts.json. Never posts anywhere."""
+    from . import digest as digest_mod
+
+    out = digest_mod.write(week=week)
+    typer.echo(f"wrote {out['markdown']} and its posts.json; lengths {out['json']}")
+
+
 @app.command()
 def queries() -> None:
     """List the discovery queries and their ids."""
