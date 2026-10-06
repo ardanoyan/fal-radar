@@ -27,6 +27,7 @@ const Coverage = z.object({
   literal_match: z.number(),
   dropped: z.number(),
   in_docs: z.number(),
+  vendored: z.number().optional(),
   repos: z.number(),
 });
 

@@ -63,7 +63,8 @@ export default function About() {
         <p className="section-note" style={{ marginTop: 4 }}>
           Run <span className="mono">{s.run_id ?? s.data_date}</span>, {fmt(s.queries_run.length)} of{" "}
           {fmt(s.queries_total)} searches. Total: GitHub&apos;s estimate. Slices: the sum over the split
-          searches. Kept: files with the exact string, outside documentation.
+          searches. Dropped: no exact string. Docs: counted as mentions. Vendored: copies of
+          libraries (node_modules, site-packages, vendor, build output), not evidence.
         </p>
         <div className="table-scroll">
           <table>
@@ -75,6 +76,7 @@ export default function About() {
                 <th>Files</th>
                 <th>Dropped</th>
                 <th>Docs</th>
+                <th>Vendored</th>
                 <th>Repos</th>
               </tr>
             </thead>
@@ -87,6 +89,7 @@ export default function About() {
                   <td>{fmt(c.files)}</td>
                   <td>{fmt(c.dropped)}</td>
                   <td>{fmt(c.in_docs)}</td>
+                  <td>{c.vendored != null ? fmt(c.vendored) : ""}</td>
                   <td>{fmt(c.repos)}</td>
                 </tr>
               ))}
