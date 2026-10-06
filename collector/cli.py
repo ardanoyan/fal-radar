@@ -48,6 +48,13 @@ def run(
         int | None,
         typer.Option("--limit-repos", min=1, help="Look up at most this many repositories."),
     ] = None,
+    run_id: Annotated[
+        str | None,
+        typer.Option(
+            "--run-id",
+            help="Rebuild an earlier run (YYYY-MM-DD) from its cache, fetching what is missing.",
+        ),
+    ] = None,
 ) -> None:
     """Discover, enrich and write data/. The token comes from GH_SEARCH_TOKEN, never a flag."""
     options = pipeline.RunOptions(
@@ -59,6 +66,7 @@ def run(
         skip_readmes=skip_readmes,
         skip_scoped=skip_scoped,
         limit_repos=limit_repos,
+        run_id=run_id,
     )
     try:
         summary = pipeline.run(config.DEFAULT_PATHS, options, log=typer.echo)

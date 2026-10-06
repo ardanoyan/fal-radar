@@ -118,11 +118,14 @@ HITS = [
     ("dora/readme-only", "README.md", 'npm i "@fal-ai/client"'),
     # Same words without the literal string: GitHub ignores punctuation, the collector does not.
     ("zed/unrelated", "notes.txt", "the fal ai client was slow"),
+    # A committed copy of an installed package: not evidence that the project calls fal.
+    ("vic/vendored", "node_modules/@fal-ai/client/package.json", '"@fal-ai/client": "1.10.1"'),
 ]
 IDS = {
     **{name: r["id"] for name, r in REPOS.items()},
     **{name: m["id"] for name, m in MENTION_REPOS.items()},
     "zed/unrelated": 99,
+    "vic/vendored": 98,
 }
 
 # package.json bodies served by the contents API.
@@ -394,7 +397,8 @@ def test_totals_and_headline(env):
     assert t["headline"] == 4 and t["fal_template_copies"] == 1 and t["from_fal"] == 1
     assert t["mentions"] == 1  # dora's README hit
     q = summary["coverage"][0]
-    assert q["files"] == 10 and q["literal_match"] == 9 and q["dropped"] == 1
+    assert q["files"] == 11 and q["literal_match"] == 10 and q["dropped"] == 1
+    assert q["vendored"] == 1
     assert q["in_docs"] == 1 and q["repos"] == 8
 
 
@@ -720,7 +724,53 @@ def test_low_disk_stops_the_run_before_it_starts(env, monkeypatch):
     import collections
 
     usage = collections.namedtuple("usage", "total used free")
+    monkeypatch.setattr(pipeline, "MIN_FREE_BYTES", 1_000_000_000)
     monkeypatch.setattr(pipeline.shutil, "disk_usage", lambda p: usage(10, 10, 100_000_000))
     with pytest.raises(pipeline.LowDisk):
         run(env, FakeGitHub())
     assert not (env.runs / "2026-10-05.jsonl").exists()
+
+
+def test_vendored_hits_are_not_evidence(env):
+    summary = run(env, FakeGitHub())
+    assert "vic/vendored" not in load(env) and "vic/vendored" not in load_mentions(env)
+    assert summary["coverage"][0]["vendored"] == 1
+
+
+def test_vendored_paths():
+    from collector.queries import is_vendored_path
+
+    yes = [
+        "node_modules/@fal-ai/client/src/x.ts",
+        "app/.venv/lib/python3.12/site-packages/litellm/x.py",
+        "vendor/litellm/fal.py",
+        "web/dist/assets/index-abc.js",
+        "static/app.min.js",
+        "third_party/fal/client.py",
+    ]
+    no = [
+        "src/app.ts",
+        "package.json",
+        "requirements.txt",
+        "myvenv_notes.py",
+        "builder/run.py",
+        "distance/calc.py",
+    ]
+    assert all(is_vendored_path(p) for p in yes)
+    assert not any(is_vendored_path(p) for p in no)
+
+
+def test_run_id_rebuilds_an_earlier_run_from_its_cache(env):
+    run(env, FakeGitHub(), full=True)
+    again = FakeGitHub()
+    pipeline.run(
+        env,
+        pipeline.RunOptions(run_id="2026-10-05"),
+        transport=httpx.MockTransport(again),
+        sleep=FakeClock().sleep,
+        now=FakeClock().now,
+        log=lambda _m: None,
+        run_date="2026-10-20",
+    )
+    # Everything replays from the run's cache: only the free rate limit check goes out.
+    assert {r.url.path for r in again.requests} <= {"/rate_limit"}

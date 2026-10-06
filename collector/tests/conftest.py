@@ -79,3 +79,11 @@ def make_client(tmp_path, clock):
         return client, recorder
 
     return _make
+
+
+@pytest.fixture(autouse=True)
+def _no_disk_check(monkeypatch):
+    """Tests write a few KB; the real free-space check is tested on its own."""
+    from collector import pipeline
+
+    monkeypatch.setattr(pipeline, "MIN_FREE_BYTES", 0)

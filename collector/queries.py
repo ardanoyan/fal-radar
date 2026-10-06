@@ -240,6 +240,38 @@ def is_doc_path(path: str) -> bool:
     return name.endswith(DOC_EXTENSIONS)
 
 
+# Code a project carries along rather than writes: installed packages, vendored copies,
+# build output and bundles. A hit there shows that a library contains a fal string (for
+# example a vendored LiteLLM), not that the project calls fal. Counted, never evidence.
+VENDORED_DIRS = (
+    "node_modules/",
+    "site-packages/",
+    "dist-packages/",
+    "vendor/",
+    "vendors/",
+    "third_party/",
+    "third-party/",
+    "3rdparty/",
+    ".venv/",
+    "venv/",
+    "virtualenv/",
+    "dist/",
+    "build/",
+    ".next/",
+    "bower_components/",
+    "jspm_packages/",
+    "_vendor/",
+)
+VENDORED_SUFFIXES = (".min.js", ".min.mjs", ".bundle.js", ".chunk.js", ".js.map")
+
+
+def is_vendored_path(path: str) -> bool:
+    p = "/" + path.lower()
+    if any(f"/{d}" in p for d in VENDORED_DIRS):
+        return True
+    return p.endswith(VENDORED_SUFFIXES)
+
+
 def verify(query: Query, fragments: list[str]) -> bool:
     """True when a fragment contains one of the query's literal strings."""
     if not query.needles:

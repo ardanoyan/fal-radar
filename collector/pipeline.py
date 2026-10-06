@@ -41,6 +41,7 @@ from .queries import (
     REPO_QUERIES,
     Query,
     is_doc_path,
+    is_vendored_path,
     verify,
 )
 from .schema import Mention, Owner, Repo, StarsPoint
@@ -75,6 +76,8 @@ class RunOptions:
     skip_readmes: bool = False
     skip_scoped: bool = False
     limit_repos: int | None = None
+    # Rebuild an earlier run from its cache (only what is missing is fetched).
+    run_id: str | None = None
 
 
 @dataclass
@@ -174,7 +177,7 @@ def run(
         if run_id is None:
             raise NothingToResume("no unfinished full run under data/runs/ to resume")
     else:
-        run_id = run_date or runlog.today_utc()
+        run_id = options.run_id or run_date or runlog.today_utc()
     today = dt.date.fromisoformat(run_id)
 
     if not options.offline:
@@ -340,6 +343,9 @@ class _Run:
                 continue
             report.verified_files += 1
             path = item.get("path", "")
+            if is_vendored_path(path):
+                report.vendored_files += 1
+                continue
             doc = is_doc_path(path)
             report.doc_files += int(doc)
             repo = item["repository"]
@@ -365,7 +371,8 @@ class _Run:
         self.log(
             f"  total_count {report.total_count}, slices {len(report.slices)}, "
             f"files {report.files} (literal match {report.verified_files}, "
-            f"dropped {report.unverified_files}, in docs {report.doc_files}), "
+            f"dropped {report.unverified_files}, in docs {report.doc_files}, "
+            f"vendored {report.vendored_files}), "
             f"repositories {report.counted_repos}" + (", sampled" if report.sampled else "")
         )
 
@@ -675,7 +682,11 @@ class _Run:
                 )
                 info["errors"] += 1
                 continue
-            code_items = [i for i in items if not is_doc_path(i.get("path", ""))]
+            code_items = [
+                i
+                for i in items
+                if not is_doc_path(i.get("path", "")) and not is_vendored_path(i.get("path", ""))
+            ]
             fragments = [
                 m["fragment"]
                 for i in code_items
@@ -1099,6 +1110,7 @@ class _Run:
                 "literal_match": r.verified_files,
                 "dropped": r.unverified_files,
                 "in_docs": r.doc_files,
+                "vendored": r.vendored_files,
                 "repos": r.counted_repos,
                 "requests": r.requests,
             }

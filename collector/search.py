@@ -69,6 +69,7 @@ class QueryReport:
     verified_files: int = 0
     unverified_files: int = 0
     doc_files: int = 0
+    vendored_files: int = 0
     counted_repos: int = 0
 
     def to_dict(self) -> dict[str, Any]:
