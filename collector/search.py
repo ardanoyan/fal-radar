@@ -51,6 +51,12 @@ class QueryReport:
     repos: int = 0
     truncated_slices: int = 0
     requests: int = 0
+    # Filled in by the pipeline: hits whose fragments contain the literal string,
+    # hits that do not (dropped), and hits in documentation files (mention tier).
+    verified_files: int = 0
+    unverified_files: int = 0
+    doc_files: int = 0
+    counted_repos: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

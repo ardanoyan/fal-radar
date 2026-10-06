@@ -37,6 +37,10 @@ class Paths:
         return self.data / "etags.json"
 
     @property
+    def gone(self) -> Path:
+        return self.data / "gone.json"
+
+    @property
     def exclusions(self) -> Path:
         return self.data / "exclusions.json"
 

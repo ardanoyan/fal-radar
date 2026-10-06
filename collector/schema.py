@@ -45,6 +45,10 @@ class Repo(BaseModel):
     fork: bool
     archived: bool
     is_template: bool
+    # full_name of the root repository of a fork, and of the template a repo was
+    # generated from. Copies of fal's own templates never count toward the headline.
+    fork_source: str | None = None
+    template_source: str | None = None
     owner: Owner
     # "code": fal shows up in the code. "mention": README, description or topics only.
     evidence: Literal["code", "mention"]

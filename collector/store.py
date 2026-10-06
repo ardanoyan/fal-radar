@@ -45,6 +45,15 @@ def load_exclusions(path: Path) -> Exclusions:
     return Exclusions.model_validate(read_json(path, {}))
 
 
+def load_gone(path: Path) -> dict[str, dict]:
+    """Repositories that answered 404, 403 or 451, keyed by lower-case full name."""
+    return dict(read_json(path, {}))
+
+
+def save_gone(path: Path, gone: dict[str, dict]) -> None:
+    write_json_atomic(path, dict(sorted(gone.items())))
+
+
 def load_etags(path: Path) -> dict[str, str]:
     return dict(read_json(path, {}))
 

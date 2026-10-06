@@ -1,4 +1,10 @@
-"""The discovery queries. Each one names the evidence tier it proves and the client it implies."""
+"""The discovery queries. Each one names the evidence tier it proves and the client it implies.
+
+GitHub's legacy code search ignores punctuation, so a quoted phrase like
+"@fal-ai/client" matches the words "fal ai client" in sequence. Every code query
+therefore carries `needles`: a hit only counts when one of its text-match fragments
+contains one of these literal strings (case-insensitive).
+"""
 
 from __future__ import annotations
 
@@ -14,101 +20,138 @@ class Query:
     q: str
     tier: str  # "code" or "mention"
     source: str  # label stored in a repo's "sources"
-    client: str | None = None  # js, python, swift, kotlin, dart, http
+    client: str | None = None  # js, python, swift, kotlin, dart, http, integration
+    needles: tuple[str, ...] = ()  # literal strings a fragment must contain to count
     max_pages: int | None = None  # None: fetch everything, slicing past the 1,000 cap
 
 
+def _code(qid: str, q: str, source: str, client: str, needles: tuple[str, ...]) -> Query:
+    return Query(qid, "code", q, "code", source, client, needles)
+
+
 CODE_QUERIES: list[Query] = [
-    Query(
+    # JavaScript and TypeScript manifests.
+    _code(
         "js-client",
-        "code",
         '"@fal-ai/client" filename:package.json',
-        "code",
         "code:@fal-ai/client",
         "js",
+        ('"@fal-ai/client"',),
     ),
-    Query(
+    _code(
         "js-serverless-client",
-        "code",
         '"@fal-ai/serverless-client" filename:package.json',
-        "code",
         "code:@fal-ai/serverless-client",
         "js",
+        ('"@fal-ai/serverless-client"',),
     ),
-    Query(
+    _code(
         "js-server-proxy",
-        "code",
         '"@fal-ai/server-proxy" filename:package.json',
-        "code",
         "code:@fal-ai/server-proxy",
         "js",
+        ('"@fal-ai/server-proxy"',),
     ),
-    Query(
+    # Python. pip treats fal-client and fal_client as the same name.
+    _code(
         "py-requirements",
-        "code",
         '"fal-client" filename:requirements.txt',
-        "code",
         "code:fal-client:requirements.txt",
         "python",
+        ("fal-client", "fal_client"),
     ),
-    Query(
+    _code(
         "py-pyproject",
-        "code",
         '"fal-client" filename:pyproject.toml',
-        "code",
         "code:fal-client:pyproject.toml",
         "python",
+        ("fal-client", "fal_client"),
     ),
-    Query(
+    _code(
         "py-import",
-        "code",
         '"import fal_client" language:python',
-        "code",
         "code:import fal_client",
         "python",
+        ("import fal_client",),
     ),
-    Query(
+    _code(
         "py-from-import",
-        "code",
         '"from fal_client" language:python',
-        "code",
         "code:from fal_client",
         "python",
+        ("from fal_client",),
     ),
-    Query(
+    # Swift, Kotlin, Dart.
+    _code(
         "swift-package",
-        "code",
         '"FalClient" filename:Package.swift',
-        "code",
         "code:FalClient:Package.swift",
         "swift",
+        ("falclient",),
     ),
-    Query(
+    _code(
         "kotlin-gradle-kts",
-        "code",
         '"ai.fal.client" filename:build.gradle.kts',
-        "code",
         "code:ai.fal.client:build.gradle.kts",
         "kotlin",
+        ("ai.fal.client",),
     ),
-    Query(
+    _code(
         "kotlin-gradle",
-        "code",
         '"ai.fal.client" filename:build.gradle',
-        "code",
         "code:ai.fal.client:build.gradle",
         "kotlin",
+        ("ai.fal.client",),
     ),
-    Query(
+    _code(
         "dart-pubspec",
-        "code",
         '"fal_client" filename:pubspec.yaml',
-        "code",
         "code:fal_client:pubspec.yaml",
         "dart",
+        ("fal_client",),
     ),
-    Query("http-queue", "code", '"queue.fal.run"', "code", "code:queue.fal.run", "http"),
-    Query("http-run", "code", '"fal.run/fal-ai"', "code", "code:fal.run/fal-ai", "http"),
+    # Direct HTTP calls.
+    _code("http-queue", '"queue.fal.run"', "code:queue.fal.run", "http", ("queue.fal.run",)),
+    _code("http-run", '"fal.run/fal-ai"', "code:fal.run/fal-ai", "http", ("fal.run/fal-ai",)),
+    # Integration packages that call fal without a fal client dependency.
+    _code(
+        "int-ai-sdk",
+        '"@ai-sdk/fal" filename:package.json',
+        "code:@ai-sdk/fal",
+        "integration",
+        ('"@ai-sdk/fal"',),
+    ),
+    _code(
+        "int-tanstack",
+        '"@tanstack/ai-fal" filename:package.json',
+        "code:@tanstack/ai-fal",
+        "integration",
+        ('"@tanstack/ai-fal"',),
+    ),
+    _code(
+        "int-livekit-requirements",
+        '"livekit-plugins-fal" filename:requirements.txt',
+        "code:livekit-plugins-fal:requirements.txt",
+        "integration",
+        ("livekit-plugins-fal", "livekit_plugins_fal"),
+    ),
+    _code(
+        "int-livekit-pyproject",
+        '"livekit-plugins-fal" filename:pyproject.toml',
+        "code:livekit-plugins-fal:pyproject.toml",
+        "integration",
+        ("livekit-plugins-fal", "livekit_plugins_fal"),
+    ),
+    _code(
+        "int-litellm", '"fal_ai/fal-ai"', "code:litellm fal_ai/", "integration", ("fal_ai/fal-ai/",)
+    ),
+    _code(
+        "int-n8n",
+        '"@fal-ai/n8n-nodes-fal" filename:package.json',
+        "code:@fal-ai/n8n-nodes-fal",
+        "integration",
+        ('"@fal-ai/n8n-nodes-fal"',),
+    ),
 ]
 
 REPO_QUERIES: list[Query] = [
@@ -132,3 +175,32 @@ REPO_QUERIES: list[Query] = [
 ]
 
 ALL_QUERIES: dict[str, Query] = {q.id: q for q in [*CODE_QUERIES, *REPO_QUERIES]}
+
+# Files whose text is documentation, not code. A hit in one of these is a mention.
+DOC_EXTENSIONS = (".md", ".mdx", ".markdown", ".rst", ".adoc")
+
+
+def is_doc_path(path: str) -> bool:
+    return path.lower().endswith(DOC_EXTENSIONS)
+
+
+def verify(query: Query, fragments: list[str]) -> bool:
+    """True when a fragment contains one of the query's literal strings."""
+    if not query.needles:
+        return True
+    lowered = [f.lower() for f in fragments]
+    return any(n.lower() in f for n in query.needles for f in lowered)
+
+
+# Facts about the search API that bound every count. Logged with each run.
+API_FACTS = [
+    "GitHub's REST search finds up to 4,000 matching repositories per search and returns "
+    "results from those, so totals are lower bounds.",
+    "Search responses carry no ETag, so conditional requests cannot save search quota; "
+    "data/etags.json covers repository and user lookups only.",
+    "The REST code search uses the legacy index: default branch only, files under 384 KB, "
+    "repositories active in the last year, no archived repositories, forks only with more "
+    "stars than their parent.",
+    "Punctuation is ignored in code search phrases, so each hit is checked against the "
+    "literal string in its text-match fragments.",
+]

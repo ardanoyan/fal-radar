@@ -21,7 +21,7 @@ from .cache import DiskCache
 from .enrich import fetch_owners, fetch_repos
 from .github import GitHubClient
 from .models import default_index
-from .queries import ALL_QUERIES, CODE_QUERIES, Query
+from .queries import ALL_QUERIES, API_FACTS, CODE_QUERIES, Query, is_doc_path, verify
 from .schema import Owner, Repo, StarsPoint
 from .search import code_search
 
@@ -92,6 +92,21 @@ def _history(previous: list[StarsPoint], date: str, stars: int) -> list[StarsPoi
     return sorted(points, key=lambda p: p.date)
 
 
+FAL_OWNERS = {"fal-ai", "fal-ai-community"}
+
+
+def _from_fal_template(repo: Repo) -> bool:
+    for source in (repo.fork_source, repo.template_source):
+        if source and source.split("/", 1)[0].lower() in FAL_OWNERS:
+            return True
+    return False
+
+
+def is_headline(repo: Repo) -> bool:
+    """Counts toward the headline: fal in the code, not a fork, not a copy of a fal template."""
+    return repo.evidence == "code" and not repo.fork and not _from_fal_template(repo)
+
+
 def run(
     paths: config.Paths,
     options: RunOptions,
@@ -122,6 +137,7 @@ def run(
         offline=options.offline,
         limit_repos=options.limit_repos,
         skip_owners=options.skip_owners,
+        api_facts=API_FACTS,
     )
     started = now()
     token = None if options.offline else config.get_token(paths)
@@ -186,29 +202,56 @@ def _run(
             max_pages=query.max_pages,
             on_slice=lambda s, q=query: journal.event("slice", query=q.id, **s.__dict__),
         )
+        counted: set[int] = set()
+        for item in items:
+            fragments = [
+                m["fragment"] for m in (item.get("text_matches") or []) if m.get("fragment")
+            ]
+            if not verify(query, fragments):
+                report.unverified_files += 1
+                continue
+            report.verified_files += 1
+            doc = is_doc_path(item.get("path", ""))
+            report.doc_files += int(doc)
+            repo = item["repository"]
+            rid = int(repo["id"])
+            counted.add(rid)
+            hit = hits.setdefault(rid, _Hit(rid, repo["full_name"]))
+            hit.files += 1
+            if doc:
+                # A fal string in documentation is a mention, not code.
+                hit.sources.add(f"{query.source}:docs")
+                hit.tiers.add("mention")
+                continue
+            hit.sources.add(query.source)
+            hit.tiers.add(query.tier)
+            if query.client:
+                hit.clients.add(query.client)
+            hit.fragments.extend(fragments)
+        report.counted_repos = len(counted)
         journal.event("query_finished", **report.to_dict())
         reports.append(report)
         log(
             f"  total_count {report.total_count}, slices {len(report.slices)}, "
-            f"files {report.files}, repositories {report.repos}"
+            f"files {report.files} (literal match {report.verified_files}, "
+            f"dropped {report.unverified_files}, in docs {report.doc_files}), "
+            f"repositories {report.counted_repos}"
         )
-        for item in items:
-            repo = item["repository"]
-            hit = hits.setdefault(int(repo["id"]), _Hit(int(repo["id"]), repo["full_name"]))
-            hit.sources.add(query.source)
-            hit.tiers.add(query.tier)
-            hit.files += 1
-            if query.client:
-                hit.clients.add(query.client)
-            for match in item.get("text_matches") or []:
-                fragment = match.get("fragment")
-                if fragment:
-                    hit.fragments.append(fragment)
 
     # 2. Which repositories to look up: everything found now, plus everything known before.
-    wanted: dict[int, str] = {h.repo_id: h.full_name for h in hits.values()}
+    # A repo recorded as gone is not asked for again while search still returns the same
+    # repository id (a stale index). A new id under the same name is a new repo.
+    gone = store.load_gone(paths.gone)
+    stale_hits = 0
+    wanted: dict[int, str] = {}
+    for h in hits.values():
+        if gone.get(h.full_name.lower(), {}).get("id") == h.repo_id:
+            stale_hits += 1
+            continue
+        wanted[h.repo_id] = h.full_name
     for repo in previous.values():
-        wanted.setdefault(repo.id, repo.full_name)
+        if repo.full_name.lower() not in gone:
+            wanted.setdefault(repo.id, repo.full_name)
     wanted = {
         rid: name
         for rid, name in wanted.items()
@@ -301,6 +344,8 @@ def _run(
             old is not None and old.evidence == "code"
         )
         license_info = data.get("license") or {}
+        fork_source = ((data.get("source") or {}).get("full_name")) if fork else None
+        template_source = (data.get("template_repository") or {}).get("full_name")
         record = Repo(
             id=real_id,
             full_name=full_name,
@@ -317,6 +362,8 @@ def _run(
             fork=fork,
             archived=bool(data.get("archived")),
             is_template=is_template,
+            fork_source=fork_source,
+            template_source=template_source,
             owner=_owner_from(data, profiles.get(login), old.owner if old else None),
             evidence="code" if code_tier else "mention",
             sources=sorted(sources),
@@ -359,15 +406,30 @@ def _run(
             continue
         built[rid] = old
 
+    id_of = {wanted[rid].lower(): rid for rid in order}
+    for name in enrich_report.gone:
+        fact = facts.get(name)
+        gone[name.lower()] = {
+            "id": id_of.get(name.lower()),
+            "status": fact.status if fact else None,
+            "since": run_id,
+        }
+    for name, fact in facts.items():
+        if fact.data is not None or fact.not_modified:
+            gone.pop(name.lower(), None)
+
     repos = list(built.values())
     store.save_repos(paths.repos, repos)
+    store.save_gone(paths.gone, gone)
     core_prefixes = (f"{config.API_ROOT}/repos/", f"{config.API_ROOT}/users/")
     store.save_etags(
         paths.etags, {u: e for u, e in client.etags.items() if u.startswith(core_prefixes)}
     )
 
     code = [r for r in repos if r.evidence == "code"]
+    headline = [r for r in code if is_headline(r)]
     totals = {
+        "headline": len(headline),
         "repos": len(repos),
         "code_tier": len(code),
         "mention_tier": len(repos) - len(code),
@@ -375,8 +437,11 @@ def _run(
         "code_tier_notable": sum(1 for r in code if r.notable),
         "code_tier_active": sum(1 for r in code if r.active),
         "owners": len({r.owner.login.lower() for r in code}),
+        "headline_owners": len({r.owner.login.lower() for r in headline}),
+        "fal_template_copies": sum(1 for r in code if _from_fal_template(r)),
         "found_this_run": len(hits),
         "gone": len(enrich_report.gone),
+        "gone_skipped_stale_hits": stale_hits,
         "renamed": len(enrich_report.renamed),
     }
     return {
@@ -399,7 +464,9 @@ def _run(
         },
         "unknown_model_ids": dict(unknown_ids.most_common(MAX_UNKNOWN_IDS_IN_SUMMARY)),
         "requests": {k: dict(v) for k, v in sorted(client.stats.items())},
+        "api_facts": API_FACTS,
         "notes": [
+            "headline: code tier, not a fork, not generated from one of fal's own templates.",
             "notable is a lower bound until the README lookup exists (Phase 1).",
             "models are those seen in code search fragments: models seen in code, at least.",
         ],
