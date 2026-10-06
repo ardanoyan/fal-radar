@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import urllib.parse
@@ -10,9 +11,11 @@ import pytest
 from collector import pipeline, runlog
 from collector.config import MissingToken, Paths
 from collector.github import GitHubError
+from collector.schema import Repo
 
 from .conftest import FakeClock, json_response
 
+# Repos found by the "@fal-ai/client" code query.
 REPOS = {
     "alice/studio": dict(
         id=1,
@@ -69,6 +72,32 @@ REPOS = {
         otype="User",
         template="fal-ai/fal-nextjs-template",
     ),
+    "fal-ai-community/demo": dict(
+        id=7,
+        stars=300,
+        fork=False,
+        desc="Official demo",
+        pushed="2026-10-01T10:00:00Z",
+        login="fal-ai-community",
+        otype="Organization",
+    ),
+    "ivan/fal-sdk-wrapper": dict(
+        id=8,
+        stars=1,
+        fork=False,
+        desc="A small wrapper library",
+        pushed="2026-10-02T10:00:00Z",
+        login="ivan",
+        otype="User",
+    ),
+}
+CODE_TIER = set(REPOS) - {"dora/readme-only"}
+
+# Repos found only by repository search (mention tier).
+MENTION_REPOS = {
+    "gina/big-mention": dict(id=20, stars=25, desc="Uses fal.ai for images"),
+    "hank/small-mention": dict(id=21, stars=2, desc="Mentions fal.ai in the README"),
+    "jill/gone-mention": dict(id=22, stars=40, desc="Mentions fal.ai"),
 }
 
 # What /search/code returns for the "@fal-ai/client" query: (repo, path, fragment).
@@ -83,17 +112,68 @@ HITS = [
     ("carol/studio", "package.json", '"@fal-ai/client": "^1.10.1"'),
     ("acme/bot", "package.json", '"@fal-ai/client": "1.9.0"'),
     ("erin/my-fal-app", "package.json", '"@fal-ai/client": "^1.10.1"'),
+    ("fal-ai-community/demo", "package.json", '"@fal-ai/client": "^1.10.1"'),
+    ("ivan/fal-sdk-wrapper", "package.json", '"@fal-ai/client": "^1.10.1"'),
     # A README that names the client: a mention, not code.
     ("dora/readme-only", "README.md", 'npm i "@fal-ai/client"'),
     # Same words without the literal string: GitHub ignores punctuation, the collector does not.
     ("zed/unrelated", "notes.txt", "the fal ai client was slow"),
 ]
-IDS = {**{name: r["id"] for name, r in REPOS.items()}, "zed/unrelated": 99}
+IDS = {
+    **{name: r["id"] for name, r in REPOS.items()},
+    **{name: m["id"] for name, m in MENTION_REPOS.items()},
+    "zed/unrelated": 99,
+}
+
+# package.json bodies served by the contents API.
+MANIFESTS = {
+    "acme/bot": {"dependencies": {"@fal-ai/client": "1.9.0", "discord.js": "14"}},
+    "alice/studio": {"private": True, "dependencies": {"@fal-ai/client": "^1", "next": "15"}},
+    "ivan/fal-sdk-wrapper": {"main": "dist/index.js", "dependencies": {"@fal-ai/client": "^1"}},
+}
+
+# What a scoped "fal-ai/" repo:X search returns: (path, fragment) pairs, or 422.
+SCOPED = {
+    "alice/studio": [
+        ("app/page.tsx", 'fal.subscribe("fal-ai/kling-video/v2/master/image-to-video")'),
+        ("README.md", "We also tried fal-ai/veo3"),
+    ],
+    "gina/big-mention": [
+        ("src/gen.py", 'import fal_client\nfal_client.subscribe("fal-ai/flux/schnell")')
+    ],
+    "jill/gone-mention": 422,
+}
 
 
 def repo_body(name: str) -> dict:
-    r = REPOS[name]
     owner = name.split("/")[0]
+    if name in MENTION_REPOS:
+        m = MENTION_REPOS[name]
+        return {
+            "id": m["id"],
+            "name": name.split("/")[1],
+            "full_name": name,
+            "html_url": f"https://github.com/{name}",
+            "description": m["desc"],
+            "stargazers_count": m["stars"],
+            "forks_count": 0,
+            "language": "Python",
+            "topics": [],
+            "license": None,
+            "homepage": None,
+            "created_at": "2026-08-01T00:00:00Z",
+            "pushed_at": "2026-10-01T00:00:00Z",
+            "fork": False,
+            "archived": False,
+            "is_template": False,
+            "owner": {
+                "login": owner,
+                "type": "User",
+                "avatar_url": "https://a.example/x",
+                "html_url": f"https://github.com/{owner}",
+            },
+        }
+    r = REPOS[name]
     body = {
         "id": r["id"],
         "name": name.split("/")[1],
@@ -125,6 +205,15 @@ def repo_body(name: str) -> dict:
     return body
 
 
+def search_item(name: str, file_path: str, fragment: str) -> dict:
+    return {
+        "name": file_path.rsplit("/", 1)[-1],
+        "path": file_path,
+        "repository": {"id": IDS[name], "full_name": name},
+        "text_matches": [{"fragment": fragment}],
+    }
+
+
 class FakeGitHub:
     def __init__(self) -> None:
         self.requests: list[httpx.Request] = []
@@ -132,33 +221,74 @@ class FakeGitHub:
         self.fail_repo: str | None = None
         self.gone: set[str] = set()
         self.hidden_from_search: set[str] = set()
+        self.scoped: list[str] = []
+        self.readmes: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         path = request.url.path
+        params = dict(urllib.parse.parse_qsl(request.url.query.decode()))
         if path == "/rate_limit":
             res = {
                 k: {"limit": v, "remaining": v, "reset": 1_900_000_000}
                 for k, v in (("core", 5000), ("search", 30), ("code_search", 10))
             }
             return json_response(200, {"resources": res})
-        if path == "/search/code":
-            q = dict(urllib.parse.parse_qsl(request.url.query.decode()))["q"]
+        if path == "/search/repositories":
+            q = params["q"]
             items = []
-            if "@fal-ai/client" in q:
-                for name, file_path, fragment in HITS:
-                    if name in self.hidden_from_search:
-                        continue
-                    items.append(
-                        {
-                            "name": file_path.rsplit("/", 1)[-1],
-                            "path": file_path,
-                            "repository": {"id": IDS[name], "full_name": name},
-                            "text_matches": [{"fragment": fragment}],
-                        }
-                    )
+            for name, m in MENTION_REPOS.items():
+                if "stars:>=20" in q and m["stars"] < 20:
+                    continue
+                owner = name.split("/")[0]
+                items.append(
+                    {
+                        "id": m["id"],
+                        "full_name": name,
+                        "html_url": f"https://github.com/{name}",
+                        "description": m["desc"],
+                        "stargazers_count": m["stars"],
+                        "language": "Python",
+                        "topics": [],
+                        "created_at": "2026-08-01T00:00:00Z",
+                        "pushed_at": "2026-10-01T00:00:00Z",
+                        "archived": False,
+                        "owner": {
+                            "login": owner,
+                            "type": "User",
+                            "avatar_url": f"https://avatars.githubusercontent.com/u/{m['id']}",
+                        },
+                    }
+                )
             body = {"total_count": len(items), "incomplete_results": False, "items": items}
             return json_response(200, body)
+        if path == "/search/code":
+            q = params["q"]
+            items = []
+            if "repo:" in q:
+                name = q.split("repo:", 1)[1].strip()
+                self.scoped.append(name)
+                answer = SCOPED.get(name, [])
+                if answer == 422:
+                    return json_response(422, {"message": "Validation Failed"})
+                items = [search_item(name, p, f) for p, f in answer]
+            elif "@fal-ai/client" in q:
+                items = [
+                    search_item(name, p, f)
+                    for name, p, f in HITS
+                    if name not in self.hidden_from_search
+                ]
+            body = {"total_count": len(items), "incomplete_results": False, "items": items}
+            return json_response(200, body)
+        if path.startswith("/repos/") and "/contents/" in path:
+            name = path[len("/repos/") :].split("/contents/", 1)[0]
+            if name not in MANIFESTS:
+                return json_response(404, {"message": "Not Found"})
+            content = base64.b64encode(json.dumps(MANIFESTS[name]).encode()).decode()
+            return json_response(200, {"type": "file", "encoding": "base64", "content": content})
+        if path.startswith("/repos/") and path.endswith("/readme"):
+            self.readmes.append(path[len("/repos/") : -len("/readme")])
+            return json_response(200, {"size": 1200, "name": "README.md"})
         if path.startswith("/repos/"):
             name = path[len("/repos/") :]
             if name == self.fail_repo:
@@ -190,11 +320,11 @@ def env(tmp_path, monkeypatch):
     return paths
 
 
-def run(paths, fake, *, date="2026-10-05", clock=None, **options):
+def run(paths, fake, *, date="2026-10-05", clock=None, only=("js-client",), **options):
     clock = clock or FakeClock()
     return pipeline.run(
         paths,
-        pipeline.RunOptions(only=["js-client"], **options),
+        pipeline.RunOptions(only=list(only), **options),
         transport=httpx.MockTransport(fake),
         sleep=clock.sleep,
         now=clock.now,
@@ -203,22 +333,30 @@ def run(paths, fake, *, date="2026-10-05", clock=None, **options):
     )
 
 
+FULL = ("js-client", "mention-readme", "promote-mention-readme")
+
+
 def load(paths):
     return {r["full_name"]: r for r in json.loads(paths.repos.read_text())}
+
+
+def load_mentions(paths):
+    return {m["full_name"]: m for m in json.loads(paths.mentions.read_text())}
 
 
 def test_first_run_builds_records(env):
     run(env, FakeGitHub())
     repos = load(env)
-    assert set(repos) == set(REPOS)
+    assert set(repos) == CODE_TIER
     a = repos["alice/studio"]
     assert a["evidence"] == "code" and a["clients"] == ["js"]
-    assert a["models"] == ["flux"]
+    assert a["models"] == ["flux", "kling"]  # flux from page.tsx, kling from the scoped search
     assert a["sources"] == ["code:@fal-ai/client"]
     assert a["notable"] and a["active"] and a["kind"] == "app"
+    assert a["stack"] == ["next"]  # from the topic and from the manifest
     assert a["first_seen"] == "2026-10-05"
     assert a["stars_history"] == [{"date": "2026-10-05", "stars": 40}]
-    assert a["stack"] == ["next"] and a["license"] == "MIT" and a["homepage"] is None
+    assert a["license"] == "MIT" and a["homepage"] is None
     assert repos["bob/nextjs-starter"]["kind"] == "template"
     assert repos["carol/studio"]["kind"] == "fork" and not repos["carol/studio"]["notable"]
     assert repos["carol/studio"]["fork_source"] == "upstream/studio"
@@ -226,25 +364,91 @@ def test_first_run_builds_records(env):
     assert not repos["acme/bot"]["active"]
 
 
+def test_manifests_give_kind_and_stack(env):
+    run(env, FakeGitHub())
+    repos = load(env)
+    assert repos["acme/bot"]["kind"] == "bot"
+    assert repos["ivan/fal-sdk-wrapper"]["kind"] == "library"
+    assert repos["alice/studio"]["kind"] == "app"  # private package with next: an app
+
+
+def test_readme_size_decides_recent_low_star_repos(env):
+    fake = FakeGitHub()
+    run(env, fake)
+    repos = load(env)
+    # 1 star, pushed 3 days before the run, a description: notable only through its README.
+    assert "ivan/fal-sdk-wrapper" in fake.readmes
+    assert repos["ivan/fal-sdk-wrapper"]["readme_bytes"] == 1200
+    assert repos["ivan/fal-sdk-wrapper"]["notable"]
+    # 40 stars: already notable, so no README lookup.
+    assert "alice/studio" not in fake.readmes
+
+
 def test_totals_and_headline(env):
     summary = run(env, FakeGitHub())
     t = summary["totals"]
-    assert t["code_tier"] == 5 and t["code_tier_non_fork"] == 4 and t["mention_tier"] == 1
-    # Headline: fal in the code, not a fork, not a copy of one of fal's own templates.
-    assert t["headline"] == 3 and t["fal_template_copies"] == 1
-    q = summary["queries"][0]
-    assert q["files"] == 8
-    assert q["verified_files"] == 7 and q["unverified_files"] == 1 and q["doc_files"] == 1
-    assert q["counted_repos"] == 6
+    assert t["code_tier"] == 7 and t["code_tier_forks"] == 1
+    # Headline: not a fork, not fal's own, not a copy of one of fal's templates.
+    assert t["headline"] == 4 and t["fal_template_copies"] == 1 and t["from_fal"] == 1
+    assert t["mentions"] == 1  # dora's README hit
+    q = summary["coverage"][0]
+    assert q["files"] == 10 and q["literal_match"] == 9 and q["dropped"] == 1
+    assert q["in_docs"] == 1 and q["repos"] == 8
+
+
+def test_fal_owned_repos_are_flagged_and_kept_out_of_the_headline(env):
+    run(env, FakeGitHub())
+    demo = load(env)["fal-ai-community/demo"]
+    assert demo["owner_is_fal"] and demo["evidence"] == "code"
+    assert not pipeline.is_headline(Repo.model_validate(demo))
 
 
 def test_literal_check_and_docs(env):
     run(env, FakeGitHub())
-    repos = load(env)
-    assert "zed/unrelated" not in repos
-    d = repos["dora/readme-only"]
-    assert d["evidence"] == "mention" and d["clients"] == [] and d["models"] == []
+    assert "zed/unrelated" not in load(env)
+    mentions = load_mentions(env)
+    d = mentions["dora/readme-only"]
     assert d["sources"] == ["code:@fal-ai/client:docs"]
+    assert "dora/readme-only" not in load(env)
+
+
+def test_mentions_and_promotion_through_a_scoped_search(env):
+    fake = FakeGitHub()
+    summary = run(env, fake, only=FULL)
+    repos, mentions = load(env), load_mentions(env)
+    # gina: 25 stars, fal-ai/flux/schnell in a Python file: promoted to the code tier.
+    g = repos["gina/big-mention"]
+    assert g["evidence"] == "code" and g["models"] == ["flux"] and g["clients"] == ["python"]
+    assert "code:scoped" in g["sources"] and "gina/big-mention" not in mentions
+    # hank: 2 stars, never a promotion candidate.
+    assert "hank/small-mention" in mentions and "hank/small-mention" not in fake.scoped
+    # jill: 40 stars but the scoped search answers 422: recorded, stays a mention.
+    assert "jill/gone-mention" in mentions
+    unsearchable = json.loads(env.unsearchable.read_text())
+    assert unsearchable["jill/gone-mention"]["status"] == 422
+    assert summary["totals"]["promoted"] == 1
+    assert summary["scoped"]["unsearchable"] == 1
+
+
+def test_scoped_search_skips_unsearchable_repos_next_time(env):
+    run(env, FakeGitHub(), only=FULL)
+    fake = FakeGitHub()
+    run(env, fake, only=FULL, date="2026-10-12")
+    assert "jill/gone-mention" not in fake.scoped
+
+
+def test_scoped_models_ignore_docs(env):
+    run(env, FakeGitHub())
+    # veo3 appears only in alice's README.
+    assert "veo" not in load(env)["alice/studio"]["models"]
+
+
+def test_snapshot_counts_headline_repos(env):
+    run(env, FakeGitHub())
+    snap = json.loads((env.snapshots / "2026-10-05.json").read_text())
+    assert snap["headline"] == 4 and snap["from_fal"] == 1 and snap["mentions"] == 1
+    assert snap["families"]["flux"]["repos"] == 1 and snap["families"]["kling"]["repos"] == 1
+    assert snap["kinds"]["bot"] == 1 and snap["kinds"]["library"] == 1
 
 
 def test_people_data_is_limited_to_public_profile_fields(env):
@@ -256,12 +460,16 @@ def test_people_data_is_limited_to_public_profile_fields(env):
 
 
 def test_exclusions_drop_repos_and_owners(env):
-    env.exclusions.write_text(json.dumps({"repos": ["Bob/NextJS-Starter"], "owners": ["acme"]}))
+    env.exclusions.write_text(
+        json.dumps({"repos": ["Bob/NextJS-Starter", "gina/big-mention"], "owners": ["acme"]})
+    )
     fake = FakeGitHub()
-    run(env, fake)
-    assert set(load(env)) == set(REPOS) - {"bob/nextjs-starter", "acme/bot"}
+    run(env, fake, only=FULL)
+    assert set(load(env)) == CODE_TIER - {"bob/nextjs-starter", "acme/bot"}
+    assert "gina/big-mention" not in load_mentions(env)
     looked_up = {r.url.path for r in fake.requests}
     assert "/repos/acme/bot" not in looked_up and "/users/acme" not in looked_up
+    assert "gina/big-mention" not in fake.scoped
 
 
 def test_etags_file_holds_only_repo_and_user_urls(env):
@@ -275,10 +483,10 @@ def test_run_log_records_queries_facts_and_finish(env):
     events = runlog.read_events(env.runs / "2026-10-05.jsonl")
     names = [e["event"] for e in events]
     assert names[0] == "run_started" and names[-1] == "run_finished"
-    assert "query_finished" in names and "slice" in names
+    assert "query_finished" in names and "slice" in names and "stage" in names
     assert any("4,000" in fact for fact in events[0]["api_facts"])
     summary = json.loads((env.runs / "2026-10-05.json").read_text())
-    assert summary["totals"]["repos"] == 6
+    assert summary["totals"]["repos_in_file"] == 7
     assert any("ETag" in fact for fact in summary["api_facts"])
 
 
@@ -295,8 +503,11 @@ def test_week_two_with_304s_keeps_records_and_recomputes_dates(env):
     # Pushed on 1 Oct 2026: active in October, not 109 days later, with no change on GitHub.
     assert not a["active"]
     assert a["owner"]["name"] == "Alice Example"
+    assert a["kind"] == "app" and a["stack"] == ["next"]
     sent = [
-        r.headers.get("if-none-match") for r in fake.requests if r.url.path.startswith("/repos/")
+        r.headers.get("if-none-match")
+        for r in fake.requests
+        if r.url.path.startswith("/repos/") and r.url.path.count("/") == 3
     ]
     assert sent and all(sent)
 
@@ -346,9 +557,27 @@ def test_failed_run_leaves_data_alone_and_resume_replays_the_cache(env):
 
     retry = FakeGitHub()
     run(env, retry, resume=True)
-    assert [r for r in retry.requests if r.url.path == "/search/code"] == []
-    assert set(load(env)) == set(REPOS)
+    # Discovery searches replay from the cache; only the stages after the crash are new.
+    discovery = [
+        r for r in retry.requests if r.url.path == "/search/code" and "repo%3A" not in str(r.url)
+    ]
+    assert discovery == []
+    assert {"/repos/alice/studio", "/repos/acme/bot"}.isdisjoint(
+        {r.url.path for r in retry.requests}
+    )
+    assert set(load(env)) == CODE_TIER
     assert runlog.latest_unfinished(env.runs) is None
+
+
+def test_skip_flags_turn_stages_off(env):
+    fake = FakeGitHub()
+    run(env, fake, skip_scoped=True, skip_manifests=True, skip_readmes=True, skip_owners=True)
+    paths = {r.url.path for r in fake.requests}
+    assert not any(
+        "/contents/" in p or p.endswith("/readme") or p.startswith("/users/") for p in paths
+    )
+    assert fake.scoped == []
+    assert load(env)["acme/bot"]["kind"] == "app"  # no manifest, so no "bot"
 
 
 def test_resume_without_an_unfinished_run_is_refused(env):
@@ -376,4 +605,7 @@ def test_queries_check_literal_strings():
     assert not verify(q, ['"@fal-ai/client-extra": "1"'])
     assert verify(ALL_QUERIES["py-requirements"], ["fal_client==1.0.3"])
     assert verify(ALL_QUERIES["int-litellm"], ['model="fal_ai/fal-ai/flux-pro/v1.1"'])
+    assert verify(ALL_QUERIES["model-flux"], ['fal.run("fal-ai/flux-pro/kontext")'])
     assert all(q.needles for q in ALL_QUERIES.values() if q.kind == "code")
+    assert ALL_QUERIES["model-flux"].max_pages == 3
+    assert "stars:>=20" in ALL_QUERIES["promote-mention-readme"].q

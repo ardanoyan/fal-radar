@@ -9,6 +9,7 @@ coverage can be shown, not assumed.
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -206,5 +207,115 @@ def code_search(
 
     report.files = len(items)
     report.repos = len({int(i["repository"]["id"]) for i in items})
+    report.requests = budget.used
+    return report, items
+
+
+# -- repository search ----------------------------------------------------------------
+
+FIRST_CREATED = dt.date(2008, 1, 1)  # GitHub's launch year; no repository is older.
+
+
+def _repo_fetch(client: GitHubClient, q: str, page: int, budget: _Budget) -> dict:
+    budget.spend(q)
+    resp = client.get(
+        "/search/repositories",
+        {"q": q, "per_page": PER_PAGE, "page": page, "sort": "stars", "order": "desc"},
+        bucket="search",
+    )
+    if resp.status != 200 or not isinstance(resp.data, dict):
+        message = (resp.data or {}).get("message", "") if isinstance(resp.data, dict) else ""
+        raise GitHubError(resp.status, resp.url, message or "repository search failed")
+    return resp.data
+
+
+def _repo_pages(
+    client: GitHubClient, q: str, first: dict, budget: _Budget
+) -> tuple[list[dict], int]:
+    items = list(first.get("items", []))
+    total = int(first.get("total_count", 0))
+    last_page = min(math.ceil(min(total, RESULT_CAP) / PER_PAGE), MAX_PAGES)
+    pages = 1
+    for page in range(2, last_page + 1):
+        try:
+            data = _repo_fetch(client, q, page, budget)
+        except GitHubError as exc:
+            if exc.status == 422:
+                break
+            raise
+        pages += 1
+        batch = data.get("items", [])
+        if not batch:
+            break
+        items.extend(batch)
+    return items, pages
+
+
+def repo_search(
+    client: GitHubClient,
+    query_id: str,
+    q: str,
+    *,
+    today: dt.date,
+    on_slice: Callable[[SliceReport], None] | None = None,
+) -> tuple[QueryReport, list[dict]]:
+    """GET /search/repositories to completion, sliced by creation day (UTC) past the cap."""
+    report = QueryReport(id=query_id, q=q, kind="repo")
+    budget = _Budget(MAX_REQUESTS_PER_QUERY)
+    seen: set[int] = set()
+    items: list[dict] = []
+
+    def keep(batch: list[dict]) -> int:
+        added = 0
+        for item in batch:
+            rid = int(item["id"])
+            if rid not in seen:
+                seen.add(rid)
+                items.append(item)
+                added += 1
+        return added
+
+    def note(s: SliceReport) -> None:
+        report.slices.append(s)
+        if on_slice:
+            on_slice(s)
+
+    first = _repo_fetch(client, q, 1, budget)
+    report.total_count = int(first.get("total_count", 0))
+    report.incomplete = bool(first.get("incomplete_results"))
+    if report.total_count <= RESULT_CAP:
+        batch, pages = _repo_pages(client, q, first, budget)
+        note(SliceReport("", report.total_count, pages, keep(batch), incomplete=report.incomplete))
+        report.sum_of_slice_totals = report.total_count
+    else:
+        report.sliced = True
+        stack: list[tuple[dt.date, dt.date]] = [(FIRST_CREATED, today)]
+        while stack:
+            lo, hi = stack.pop()
+            qualifier = f"created:{lo.isoformat()}..{hi.isoformat()}"
+            sliced_q = f"{q} {qualifier}"
+            page_one = _repo_fetch(client, sliced_q, 1, budget)
+            total = int(page_one.get("total_count", 0))
+            incomplete = bool(page_one.get("incomplete_results"))
+            if total > RESULT_CAP and hi > lo:
+                mid = lo + (hi - lo) // 2
+                stack.append((mid + dt.timedelta(days=1), hi))
+                stack.append((lo, mid))
+                continue
+            if total == 0:
+                note(SliceReport(qualifier, 0, 1, 0, incomplete=incomplete))
+                continue
+            batch, pages = _repo_pages(client, sliced_q, page_one, budget)
+            truncated = total > RESULT_CAP
+            report.sum_of_slice_totals += total
+            report.truncated_slices += int(truncated)
+            report.incomplete = report.incomplete or incomplete
+            note(
+                SliceReport(
+                    qualifier, total, pages, keep(batch), truncated=truncated, incomplete=incomplete
+                )
+            )
+    report.files = len(items)
+    report.repos = len(items)
     report.requests = budget.used
     return report, items

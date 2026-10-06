@@ -174,7 +174,46 @@ REPO_QUERIES: list[Query] = [
     Query("topic-falai", "repo", "topic:falai", "mention", "repo:topic:falai"),
 ]
 
-ALL_QUERIES: dict[str, Query] = {q.id: q for q in [*CODE_QUERIES, *REPO_QUERIES]}
+# Mention repos with 20 or more stars: candidates for promotion to the code tier, which
+# happens only through a scoped code search or a manifest hit.
+PROMOTION_MIN_STARS = 20
+PROMOTION_QUERIES: list[Query] = [
+    Query(f"promote-{q.id}", "repo", f"{q.q} stars:>={PROMOTION_MIN_STARS}", "mention", q.source)
+    for q in REPO_QUERIES
+]
+
+MODEL_QUERY_PAGES = 3
+
+
+def model_queries() -> list[Query]:
+    """One sampled code search per queried model family in models.yaml."""
+    from .models import default_index
+
+    out = []
+    for fam in default_index().families:
+        if not (fam.discover and fam.query):
+            continue
+        phrase = fam.query.strip('"')
+        out.append(
+            Query(
+                f"model-{fam.id}",
+                "code",
+                f"{fam.query} {LOCKFILE_EXCLUSIONS}",
+                "code",
+                f"code:model:{fam.id}",
+                None,
+                (phrase,),
+                MODEL_QUERY_PAGES,
+            )
+        )
+    return out
+
+
+MODEL_QUERIES: list[Query] = model_queries()
+
+ALL_QUERIES: dict[str, Query] = {
+    q.id: q for q in [*CODE_QUERIES, *MODEL_QUERIES, *REPO_QUERIES, *PROMOTION_QUERIES]
+}
 
 # Files whose text is documentation, not code. A hit in one of these is a mention.
 DOC_EXTENSIONS = (".md", ".mdx", ".markdown", ".rst", ".adoc")

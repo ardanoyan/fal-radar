@@ -1,31 +1,55 @@
-"""One collector run: discover, enrich, classify, write. Nothing is written until the end.
+"""One collector run, in stages. Nothing in data/ is written until the last stage.
 
 A run is identified by its UTC date. Every response fetched during a run is cached
 under that id, so running again with --resume replays what was already fetched and
 only spends the rate limit on what is missing.
+
+Stages:
+  1. code queries (clients, integrations) and sampled model-family queries
+  2. repository search for the mention tier, and the promotion candidates (20+ stars)
+  3. repository lookups for the code tier
+  4. one manifest per code-tier repo (kind and stack)
+  5. README size, only where it decides "notable"
+  6. owner profiles
+  7. scoped "fal-ai/" searches for notable repos and promotion candidates (cap 500)
+  8. write repos, mentions, snapshot, gone and unsearchable lists, etags
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
-from . import __version__, classify, config, runlog, store
+from . import __version__, classify, config, manifests, runlog, store
 from .cache import DiskCache
-from .enrich import fetch_owners, fetch_repos
-from .github import GitHubClient
-from .models import default_index
-from .queries import ALL_QUERIES, API_FACTS, CODE_QUERIES, Query, is_doc_path, verify
-from .schema import Owner, Repo, StarsPoint
-from .search import code_search
+from .enrich import fetch_file, fetch_owners, fetch_readme_size, fetch_repos
+from .github import GitHubClient, GitHubError
+from .models import default_index, extract_fal_ai_ids, extract_partner_ids
+from .queries import (
+    ALL_QUERIES,
+    API_FACTS,
+    CODE_QUERIES,
+    MODEL_QUERIES,
+    PROMOTION_QUERIES,
+    REPO_QUERIES,
+    Query,
+    is_doc_path,
+    verify,
+)
+from .schema import Mention, Owner, Repo, StarsPoint
+from .search import QueryReport, code_search, repo_search
 
 MAX_UNKNOWN_IDS_IN_SUMMARY = 200
+SCOPED_CAP = 500
+SCOPED_PAGES = 1
+FAL_OWNERS = {"fal-ai", "fal-ai-community"}
+PROGRESS_EVERY = 250
 
 
 class NothingToResume(RuntimeError):
@@ -38,6 +62,9 @@ class RunOptions:
     resume: bool = False
     offline: bool = False
     skip_owners: bool = False
+    skip_manifests: bool = False
+    skip_readmes: bool = False
+    skip_scoped: bool = False
     limit_repos: int | None = None
 
 
@@ -49,20 +76,23 @@ class _Hit:
     clients: set[str] = field(default_factory=set)
     tiers: set[str] = field(default_factory=set)
     fragments: list[str] = field(default_factory=list)
+    manifest_paths: list[str] = field(default_factory=list)
     files: int = 0
+
+
+@dataclass
+class _MentionHit:
+    item: dict
+    sources: set[str] = field(default_factory=set)
 
 
 def select_queries(only: list[str]) -> list[Query]:
     if not only:
-        return list(CODE_QUERIES)
+        return [*CODE_QUERIES, *MODEL_QUERIES, *REPO_QUERIES, *PROMOTION_QUERIES]
     unknown = [q for q in only if q not in ALL_QUERIES]
     if unknown:
         raise ValueError(f"unknown query id: {', '.join(unknown)}. See `collector queries`.")
-    chosen = [ALL_QUERIES[q] for q in only]
-    not_yet = [q.id for q in chosen if q.kind != "code"]
-    if not_yet:
-        raise ValueError(f"repository search is not wired up yet (Phase 1): {', '.join(not_yet)}")
-    return chosen
+    return [ALL_QUERIES[q] for q in only]
 
 
 def _clean(value: Any) -> str | None:
@@ -92,19 +122,29 @@ def _history(previous: list[StarsPoint], date: str, stars: int) -> list[StarsPoi
     return sorted(points, key=lambda p: p.date)
 
 
-FAL_OWNERS = {"fal-ai", "fal-ai-community"}
+def is_fal_owner(login: str) -> bool:
+    return login.lower() in FAL_OWNERS
 
 
 def _from_fal_template(repo: Repo) -> bool:
     for source in (repo.fork_source, repo.template_source):
-        if source and source.split("/", 1)[0].lower() in FAL_OWNERS:
+        if source and is_fal_owner(source.split("/", 1)[0]):
             return True
     return False
 
 
 def is_headline(repo: Repo) -> bool:
-    """Counts toward the headline: fal in the code, not a fork, not a copy of a fal template."""
-    return repo.evidence == "code" and not repo.fork and not _from_fal_template(repo)
+    """Counts toward the headline: fal in the code, not a fork, not fal's own repo, and not
+    a copy of one of fal's templates.
+
+    Templates built by other people do count; they are only kept out of the digest's notable set.
+    """
+    return (
+        repo.evidence == "code"
+        and not repo.fork
+        and not repo.owner_is_fal
+        and not _from_fal_template(repo)
+    )
 
 
 def run(
@@ -137,6 +177,9 @@ def run(
         offline=options.offline,
         limit_repos=options.limit_repos,
         skip_owners=options.skip_owners,
+        skip_manifests=options.skip_manifests,
+        skip_readmes=options.skip_readmes,
+        skip_scoped=options.skip_scoped,
         api_facts=API_FACTS,
     )
     started = now()
@@ -153,7 +196,7 @@ def run(
         log=log,
     )
     try:
-        summary = _run(paths, options, queries, client, journal, run_id, today, log)
+        summary = _Run(paths, options, queries, client, journal, run_id, today, log).go()
     except KeyboardInterrupt:
         journal.event("run_interrupted")
         raise
@@ -168,39 +211,85 @@ def run(
     return summary
 
 
-def _run(
-    paths: config.Paths,
-    options: RunOptions,
-    queries: list[Query],
-    client: GitHubClient,
-    journal: runlog.RunLog,
-    run_id: str,
-    today: dt.date,
-    log: Callable[[str], None],
-) -> dict[str, Any]:
-    index = default_index()
-    exclusions = store.load_exclusions(paths.exclusions)
-    previous = store.load_repos(paths.repos)
+class _Run:
+    def __init__(
+        self,
+        paths: config.Paths,
+        options: RunOptions,
+        queries: list[Query],
+        client: GitHubClient,
+        journal: runlog.RunLog,
+        run_id: str,
+        today: dt.date,
+        log: Callable[[str], None],
+    ) -> None:
+        self.paths = paths
+        self.options = options
+        self.queries = queries
+        self.client = client
+        self.journal = journal
+        self.run_id = run_id
+        self.today = today
+        self.log = log
+        self.index = default_index()
+        self.exclusions = store.load_exclusions(paths.exclusions)
+        self.previous = store.load_repos(paths.repos)
+        self.previous_mentions = store.load_mentions(paths.mentions)
+        self.gone = store.load_gone(paths.gone)
+        self.unsearchable = store.load_gone(paths.unsearchable)
+        self.hits: dict[int, _Hit] = {}
+        self.mention_hits: dict[int, _MentionHit] = {}
+        self.promotion_ids: set[int] = set()
+        self.reports: list[QueryReport] = []
+        self.unknown_ids: Counter[str] = Counter()
+        self.stats: dict[str, Any] = {}
 
-    if not options.offline:
-        limits = client.rate_limit()
-        journal.event("rate_limit", limits={k: v["limit"] for k, v in limits.items()})
-        log(
-            "token accepted. limits: "
-            + ", ".join(f"{k} {v['remaining']}/{v['limit']}" for k, v in limits.items())
-        )
+    # -- helpers -------------------------------------------------------------------------
 
-    # 1. Discovery.
-    hits: dict[int, _Hit] = {}
-    reports = []
-    for query in queries:
-        log(f"query {query.id}: {query.q}")
+    def stage(self, name: str, **fields: Any) -> None:
+        self.journal.event("stage", stage=name, **fields)
+        self.log(f"stage: {name}" + (f" ({fields})" if fields else ""))
+
+    def excluded(self, full_name: str) -> bool:
+        return self.exclusions.drops(full_name, full_name.split("/", 1)[0])
+
+    def families_from(self, fragments: list[str], *, partners: bool) -> set[str]:
+        found: set[str] = set()
+        for fragment in fragments:
+            for endpoint_id in extract_fal_ai_ids(fragment):
+                family = self.index.match(endpoint_id)
+                if family:
+                    found.add(family)
+                else:
+                    self.unknown_ids[endpoint_id] += 1
+            if partners:
+                for endpoint_id in extract_partner_ids(fragment):
+                    family = self.index.match(endpoint_id)
+                    if family:
+                        found.add(family)
+        return found
+
+    # -- stage 1 and 2: discovery ----------------------------------------------------------
+
+    def discover(self) -> None:
+        code_queries = [q for q in self.queries if q.kind == "code"]
+        repo_queries = [q for q in self.queries if q.kind == "repo"]
+        self.stage("code search", queries=len(code_queries))
+        for query in code_queries:
+            self.code_query(query)
+        if repo_queries:
+            self.stage("repository search", queries=len(repo_queries))
+        for query in repo_queries:
+            self.repo_query(query)
+
+    def code_query(self, query: Query) -> None:
+        self.log(f"query {query.id}: {query.q}")
         report, items = code_search(
-            client,
+            self.client,
             query.id,
             query.q,
             max_pages=query.max_pages,
-            on_slice=lambda s, q=query: journal.event("slice", query=q.id, **s.__dict__),
+            on_slice=lambda s: self.journal.event("slice", query=query.id, **s.__dict__),
         )
         counted: set[int] = set()
         for item in items:
@@ -211,12 +300,13 @@ def _run(
                 report.unverified_files += 1
                 continue
             report.verified_files += 1
-            doc = is_doc_path(item.get("path", ""))
+            path = item.get("path", "")
+            doc = is_doc_path(path)
             report.doc_files += int(doc)
             repo = item["repository"]
             rid = int(repo["id"])
             counted.add(rid)
-            hit = hits.setdefault(rid, _Hit(rid, repo["full_name"]))
+            hit = self.hits.setdefault(rid, _Hit(rid, repo["full_name"]))
             hit.files += 1
             if doc:
                 # A fal string in documentation is a mention, not code.
@@ -228,126 +318,153 @@ def _run(
             if query.client:
                 hit.clients.add(query.client)
             hit.fragments.extend(fragments)
+            if path.rsplit("/", 1)[-1] in manifests.MANIFEST_PREFERENCE:
+                hit.manifest_paths.append(path)
         report.counted_repos = len(counted)
-        journal.event("query_finished", **report.to_dict())
-        reports.append(report)
-        log(
+        self.journal.event("query_finished", **report.to_dict())
+        self.reports.append(report)
+        self.log(
             f"  total_count {report.total_count}, slices {len(report.slices)}, "
             f"files {report.files} (literal match {report.verified_files}, "
             f"dropped {report.unverified_files}, in docs {report.doc_files}), "
-            f"repositories {report.counted_repos}"
+            f"repositories {report.counted_repos}" + (", sampled" if report.sampled else "")
         )
 
-    # 2. Which repositories to look up: everything found now, plus everything known before.
-    # A repo recorded as gone is not asked for again while search still returns the same
-    # repository id (a stale index). A new id under the same name is a new repo.
-    gone = store.load_gone(paths.gone)
-    stale_hits = 0
-    wanted: dict[int, str] = {}
-    for h in hits.values():
-        if gone.get(h.full_name.lower(), {}).get("id") == h.repo_id:
-            stale_hits += 1
-            continue
-        wanted[h.repo_id] = h.full_name
-    for repo in previous.values():
-        if repo.full_name.lower() not in gone:
-            wanted.setdefault(repo.id, repo.full_name)
-    wanted = {
-        rid: name
-        for rid, name in wanted.items()
-        if not exclusions.drops(name, name.split("/", 1)[0])
-    }
-    order = sorted(wanted, key=lambda rid: (wanted[rid].lower(), rid))
-    partial = False
-    if options.limit_repos is not None and len(order) > options.limit_repos:
-        order = order[: options.limit_repos]
-        partial = True
+    def repo_query(self, query: Query) -> None:
+        self.log(f"query {query.id}: {query.q}")
+        report, items = repo_search(
+            self.client,
+            query.id,
+            query.q,
+            today=self.today,
+            on_slice=lambda s: self.journal.event("slice", query=query.id, **s.__dict__),
+        )
+        for item in items:
+            rid = int(item["id"])
+            mh = self.mention_hits.setdefault(rid, _MentionHit(item))
+            mh.sources.add(query.source)
+            if query.id.startswith("promote-"):
+                self.promotion_ids.add(rid)
+        report.verified_files = report.files
+        report.counted_repos = report.repos
+        self.journal.event("query_finished", **report.to_dict())
+        self.reports.append(report)
+        self.log(
+            f"  total_count {report.total_count}, slices {len(report.slices)}, "
+            f"repositories {report.repos}"
+        )
 
-    log(f"looking up {len(order)} repositories")
-    facts, enrich_report = fetch_repos(client, [wanted[rid] for rid in order], log=log)
+    # -- stage 3: repository lookups -------------------------------------------------------
 
-    # 3. Owners.
-    logins: set[str] = set()
-    for rid in order:
-        fact = facts[wanted[rid]]
-        if fact.data:
-            logins.add((fact.data.get("owner") or {}).get("login", ""))
-    logins.discard("")
-    profiles: dict[str, dict | None] = {}
-    if not options.skip_owners:
-        log(f"looking up {len(logins)} owners")
-        profiles = fetch_owners(client, sorted(logins, key=str.lower), log=log)
+    def lookup_targets(self) -> tuple[list[int], dict[int, str], bool]:
+        # A repo recorded as gone is not asked for again while search still returns the
+        # same repository id (a stale index). A new id under the same name is a new repo.
+        stale = 0
+        wanted: dict[int, str] = {}
+        for h in self.hits.values():
+            if self.gone.get(h.full_name.lower(), {}).get("id") == h.repo_id:
+                stale += 1
+                continue
+            wanted[h.repo_id] = h.full_name
+        for repo in self.previous.values():
+            if repo.full_name.lower() not in self.gone:
+                wanted.setdefault(repo.id, repo.full_name)
+        wanted = {rid: name for rid, name in wanted.items() if not self.excluded(name)}
+        order = sorted(wanted, key=lambda rid: (wanted[rid].lower(), rid))
+        partial = False
+        if self.options.limit_repos is not None and len(order) > self.options.limit_repos:
+            order = order[: self.options.limit_repos]
+            partial = True
+        self.stats["gone_skipped_stale_hits"] = stale
+        return order, wanted, partial
 
-    # 4. Build the records.
-    built: dict[int, Repo] = {}
-    unknown_ids: Counter[str] = Counter()
-    for rid in order:
-        fact = facts[wanted[rid]]
-        hit = hits.get(rid)
-        old = previous.get(rid)
-        if fact.data is None:
-            # Unchanged on GitHub since the last run and no body kept: carry the old record
-            # forward, but recompute what depends on today's date and on this run's hits.
-            if fact.not_modified and old is not None:
-                families, unknown = classify.models_from_fragments(
-                    hit.fragments if hit else [], index
-                )
-                unknown_ids.update(unknown)
-                built[rid] = old.model_copy(
-                    update={
-                        "sources": sorted(set(old.sources) | (hit.sources if hit else set())),
-                        "clients": sorted(set(old.clients) | (hit.clients if hit else set())),
-                        "models": sorted(set(old.models) | set(families)),
-                        "evidence": "code"
-                        if old.evidence == "code" or (hit is not None and "code" in hit.tiers)
-                        else "mention",
-                        "active": classify.is_active(old.pushed_at, today),
-                        "notable": classify.is_notable(
-                            fork=old.fork,
-                            kind=old.kind,
-                            description=old.description,
-                            stars=old.stars,
-                            pushed_at=old.pushed_at,
-                            today=today,
-                        ),
-                        "last_seen": run_id if hit else old.last_seen,
-                        "stars_history": _history(old.stars_history, run_id, old.stars),
-                    }
-                )
-            continue
-        data = fact.data
-        real_id = int(data["id"])
-        old = previous.get(real_id, old)
-        login = (data.get("owner") or {}).get("login", "")
+    # -- stages 4 to 6 ---------------------------------------------------------------------
+
+    def read_manifests(self, facts: dict, order: list[int], wanted: dict[int, str]) -> dict:
+        signals: dict[int, manifests.ManifestSignals] = {}
+        if self.options.skip_manifests:
+            return signals
+        targets = []
+        for rid in order:
+            fact = facts.get(wanted[rid])
+            hit = self.hits.get(rid)
+            if fact is None or fact.data is None or hit is None:
+                continue
+            path = manifests.best_manifest_path(hit.manifest_paths)
+            if path:
+                targets.append((rid, fact.data["full_name"], path))
+        self.stage("manifests", repos=len(targets))
+        read = 0
+        for n, (rid, full_name, path) in enumerate(targets, start=1):
+            text = fetch_file(self.client, full_name, path)
+            parsed = manifests.parse(path.rsplit("/", 1)[-1], text) if text else None
+            if parsed:
+                signals[rid] = parsed
+                read += 1
+            if n % PROGRESS_EVERY == 0:
+                self.log(f"  manifests {n}/{len(targets)}")
+        self.stats["manifests_requested"] = len(targets)
+        self.stats["manifests_read"] = read
+        return signals
+
+    def read_readmes(self, candidates: list[tuple[int, str]]) -> dict[int, int | None]:
+        sizes: dict[int, int | None] = {}
+        if self.options.skip_readmes:
+            return sizes
+        self.stage("readmes", repos=len(candidates))
+        for rid, full_name in candidates:
+            sizes[rid] = fetch_readme_size(self.client, full_name)
+        self.stats["readmes_requested"] = len(candidates)
+        return sizes
+
+    # -- record building -------------------------------------------------------------------
+
+    def build_record(
+        self,
+        data: dict,
+        hit: _Hit | None,
+        old: Repo | None,
+        profile: dict | None,
+        signal: manifests.ManifestSignals | None,
+        readme_bytes: int | None,
+        *,
+        extra_sources: set[str] | None = None,
+        extra_models: set[str] | None = None,
+        extra_clients: set[str] | None = None,
+        promoted: bool = False,
+    ) -> Repo:
         full_name = data["full_name"]
-        if exclusions.drops(full_name, login):
-            continue
+        login = (data.get("owner") or {}).get("login", "")
         description = _clean(data.get("description"))
         stars = int(data.get("stargazers_count") or 0)
         topics = list(data.get("topics") or [])
         fork = bool(data.get("fork"))
         is_template = bool(data.get("is_template"))
         pushed_at = data.get("pushed_at")
-        families, unknown = classify.models_from_fragments(hit.fragments if hit else [], index)
-        unknown_ids.update(unknown)
         kind = classify.kind_of(
             name=data.get("name") or full_name.split("/", 1)[-1],
             description=description,
             fork=fork,
             is_template=is_template,
             stars=stars,
+            bot=bool(signal and signal.bot),
+            library=bool(signal and signal.library),
         )
+        code_tier = (
+            promoted
+            or (hit is not None and "code" in hit.tiers)
+            or (old is not None and old.evidence == "code")
+        )
+        families = self.families_from(hit.fragments, partners=code_tier) if hit else set()
         sources = set(old.sources if old else []) | (hit.sources if hit else set())
+        sources |= extra_sources or set()
         clients = set(old.clients if old else []) | (hit.clients if hit else set())
-        models = set(old.models if old else []) | set(families)
-        code_tier = (hit is not None and "code" in hit.tiers) or (
-            old is not None and old.evidence == "code"
-        )
+        clients |= extra_clients or set()
+        models = set(old.models if old else []) | families | (extra_models or set())
+        readme = readme_bytes if readme_bytes is not None else (old.readme_bytes if old else None)
         license_info = data.get("license") or {}
-        fork_source = ((data.get("source") or {}).get("full_name")) if fork else None
-        template_source = (data.get("template_repository") or {}).get("full_name")
-        record = Repo(
-            id=real_id,
+        return Repo(
+            id=int(data["id"]),
             full_name=full_name,
             html_url=data.get("html_url") or f"https://github.com/{full_name}",
             description=description,
@@ -362,112 +479,532 @@ def _run(
             fork=fork,
             archived=bool(data.get("archived")),
             is_template=is_template,
-            fork_source=fork_source,
-            template_source=template_source,
-            owner=_owner_from(data, profiles.get(login), old.owner if old else None),
+            fork_source=((data.get("source") or {}).get("full_name")) if fork else None,
+            template_source=(data.get("template_repository") or {}).get("full_name"),
+            owner=_owner_from(data, profile, old.owner if old else None),
+            owner_is_fal=is_fal_owner(login),
             evidence="code" if code_tier else "mention",
             sources=sorted(sources),
             clients=sorted(clients),
             models=sorted(models),
             kind=kind,
-            stack=classify.stack_from_topics(topics),
-            active=classify.is_active(pushed_at, today),
+            stack=classify.stack_of(
+                topics, signal.stack if signal else (old.stack if old else None)
+            ),
+            active=classify.is_active(pushed_at, self.today),
             notable=classify.is_notable(
                 fork=fork,
                 kind=kind,
                 description=description,
                 stars=stars,
                 pushed_at=pushed_at,
-                today=today,
+                today=self.today,
+                readme_bytes=readme,
             ),
-            first_seen=old.first_seen if old else run_id,
-            last_seen=run_id if hit else (old.last_seen if old else run_id),
-            stars_history=_history(old.stars_history if old else [], run_id, stars),
+            readme_bytes=readme,
+            first_seen=old.first_seen if old else self.run_id,
+            last_seen=self.run_id if (hit or promoted) else (old.last_seen if old else self.run_id),
+            stars_history=_history(old.stars_history if old else [], self.run_id, stars),
         )
-        # A renamed repository can be reached under two names; the id decides.
-        if real_id in built:
-            merged = built[real_id]
-            record = record.model_copy(
-                update={
-                    "sources": sorted(set(merged.sources) | set(record.sources)),
-                    "clients": sorted(set(merged.clients) | set(record.clients)),
-                    "models": sorted(set(merged.models) | set(record.models)),
-                }
+
+    def carry_forward(self, old: Repo, hit: _Hit | None) -> Repo:
+        """GitHub said nothing changed (304, no body kept): recompute date- and hit-based fields."""
+        families = self.families_from(hit.fragments, partners=True) if hit else set()
+        return old.model_copy(
+            update={
+                "sources": sorted(set(old.sources) | (hit.sources if hit else set())),
+                "clients": sorted(set(old.clients) | (hit.clients if hit else set())),
+                "models": sorted(set(old.models) | families),
+                "evidence": "code"
+                if old.evidence == "code" or (hit is not None and "code" in hit.tiers)
+                else "mention",
+                "owner_is_fal": is_fal_owner(old.owner.login),
+                "active": classify.is_active(old.pushed_at, self.today),
+                "notable": classify.is_notable(
+                    fork=old.fork,
+                    kind=old.kind,
+                    description=old.description,
+                    stars=old.stars,
+                    pushed_at=old.pushed_at,
+                    today=self.today,
+                    readme_bytes=old.readme_bytes,
+                ),
+                "last_seen": self.run_id if hit else old.last_seen,
+                "stars_history": _history(old.stars_history, self.run_id, old.stars),
+            }
+        )
+
+    # -- stage 7: scoped searches ----------------------------------------------------------
+
+    def scoped(
+        self, built: dict[int, Repo]
+    ) -> tuple[dict[int, set[str]], dict[int, set[str]], set[int], dict]:
+        """Model lists for notable repos, and promotion of mention repos with 20+ stars.
+
+        Returns (models by repo, clients by repo, promoted repo ids, stats).
+        """
+        models: dict[int, set[str]] = defaultdict(set)
+        clients: dict[int, set[str]] = defaultdict(set)
+        promoted: set[int] = set()
+        info = {"requested": 0, "with_hits": 0, "unsearchable": 0, "capped": 0}
+        if self.options.skip_scoped:
+            return models, clients, promoted, info
+        candidates: list[tuple[int, str, int, str]] = []
+        for rid, repo in built.items():
+            if repo.evidence == "code" and repo.notable:
+                candidates.append((rid, repo.full_name, repo.stars, repo.pushed_at or ""))
+        for rid in self.promotion_ids:
+            if rid in built and built[rid].evidence == "code":
+                continue
+            mh = self.mention_hits.get(rid)
+            if mh is None or self.excluded(mh.item["full_name"]):
+                continue
+            item = mh.item
+            candidates.append(
+                (
+                    rid,
+                    item["full_name"],
+                    int(item.get("stargazers_count") or 0),
+                    item.get("pushed_at") or "",
+                )
             )
-        built[real_id] = record
+        candidates = [c for c in candidates if c[1].lower() not in self.unsearchable]
+        candidates.sort(key=lambda c: (-c[2], _neg_date(c[3]), c[1].lower()))
+        info["capped"] = max(0, len(candidates) - SCOPED_CAP)
+        candidates = candidates[:SCOPED_CAP]
+        self.stage("scoped searches", repos=len(candidates), capped=info["capped"])
+        # (literal, client, file name the literal must sit in, or None for any code file)
+        client_needles = [
+            (n.lower(), q.client, _filename_of(q.q))
+            for q in CODE_QUERIES
+            for n in q.needles
+            if q.client
+        ]
+        for n, (rid, full_name, _stars, _pushed) in enumerate(candidates, start=1):
+            info["requested"] += 1
+            try:
+                _report, items = code_search(
+                    self.client,
+                    f"scoped:{full_name}",
+                    f'"fal-ai/" repo:{full_name}',
+                    max_pages=SCOPED_PAGES,
+                )
+            except GitHubError as exc:
+                if exc.status == 422:
+                    # The repository cannot be searched (deleted, renamed, or not indexed).
+                    self.unsearchable[full_name.lower()] = {
+                        "id": rid,
+                        "status": 422,
+                        "since": self.run_id,
+                    }
+                    info["unsearchable"] += 1
+                    continue
+                raise
+            code_items = [i for i in items if not is_doc_path(i.get("path", ""))]
+            fragments = [
+                m["fragment"]
+                for i in code_items
+                for m in (i.get("text_matches") or [])
+                if m.get("fragment")
+            ]
+            if code_items:
+                info["with_hits"] += 1
+            fams = self.families_from(fragments, partners=True)
+            models[rid] |= fams
+            seen_clients: set[str] = set()
+            for i in code_items:
+                base = i.get("path", "").rsplit("/", 1)[-1]
+                texts = [
+                    m["fragment"].lower()
+                    for m in (i.get("text_matches") or [])
+                    if m.get("fragment")
+                ]
+                for needle, client, fname in client_needles:
+                    if (fname is None or base == fname) and any(needle in t for t in texts):
+                        seen_clients.add(client)
+            clients[rid] |= seen_clients
+            if (rid not in built or built[rid].evidence != "code") and (fams or seen_clients):
+                promoted.add(rid)
+            if n % PROGRESS_EVERY == 0:
+                self.log(f"  scoped {n}/{len(candidates)}")
+        return models, clients, promoted, info
 
-    # Records we knew before and did not look up this time (a limited run) stay as they are.
-    looked_up = set(order)
-    gone_names = {n.lower() for n in enrich_report.gone}
-    for rid, old in previous.items():
-        if rid in built or rid in looked_up:
-            continue
-        if old.full_name.lower() in gone_names or exclusions.drops(old.full_name, old.owner.login):
-            continue
-        built[rid] = old
+    # -- the run -----------------------------------------------------------------------------
 
-    id_of = {wanted[rid].lower(): rid for rid in order}
-    for name in enrich_report.gone:
-        fact = facts.get(name)
-        gone[name.lower()] = {
-            "id": id_of.get(name.lower()),
-            "status": fact.status if fact else None,
-            "since": run_id,
+    def go(self) -> dict[str, Any]:
+        if not self.client.offline:
+            limits = self.client.rate_limit()
+            self.journal.event("rate_limit", limits={k: v["limit"] for k, v in limits.items()})
+            self.log(
+                "token accepted. limits: "
+                + ", ".join(f"{k} {v['remaining']}/{v['limit']}" for k, v in limits.items())
+            )
+
+        self.discover()
+
+        order, wanted, partial = self.lookup_targets()
+        self.stage("repository lookups", repos=len(order))
+        facts, enrich_report = fetch_repos(
+            self.client, [wanted[rid] for rid in order], log=self.log
+        )
+
+        signals = self.read_manifests(facts, order, wanted)
+
+        # README sizes only where they decide "notable" (recent push, few stars).
+        readme_candidates = []
+        for rid in order:
+            fact = facts[wanted[rid]]
+            if fact.data is None:
+                continue
+            d = fact.data
+            sig = signals.get(rid)
+            kind = classify.kind_of(
+                name=d.get("name") or d["full_name"].split("/", 1)[-1],
+                description=_clean(d.get("description")),
+                fork=bool(d.get("fork")),
+                is_template=bool(d.get("is_template")),
+                stars=int(d.get("stargazers_count") or 0),
+                bot=bool(sig and sig.bot),
+                library=bool(sig and sig.library),
+            )
+            if classify.needs_readme(
+                fork=bool(d.get("fork")),
+                kind=kind,
+                description=_clean(d.get("description")),
+                stars=int(d.get("stargazers_count") or 0),
+                pushed_at=d.get("pushed_at"),
+                today=self.today,
+            ):
+                readme_candidates.append((rid, d["full_name"]))
+        readmes = self.read_readmes(readme_candidates)
+
+        logins = sorted(
+            {
+                (facts[wanted[rid]].data.get("owner") or {}).get("login", "")
+                for rid in order
+                if facts[wanted[rid]].data
+            }
+            - {""},
+            key=str.lower,
+        )
+        profiles: dict[str, dict | None] = {}
+        if not self.options.skip_owners:
+            self.stage("owners", owners=len(logins))
+            profiles = fetch_owners(self.client, logins, log=self.log)
+
+        built: dict[int, Repo] = {}
+        for rid in order:
+            fact = facts[wanted[rid]]
+            hit = self.hits.get(rid)
+            old = self.previous.get(rid)
+            if fact.data is None:
+                if fact.not_modified and old is not None:
+                    built[rid] = self.carry_forward(old, hit)
+                continue
+            data = fact.data
+            real_id = int(data["id"])
+            old = self.previous.get(real_id, old)
+            login = (data.get("owner") or {}).get("login", "")
+            if self.exclusions.drops(data["full_name"], login):
+                continue
+            record = self.build_record(
+                data, hit, old, profiles.get(login), signals.get(rid), readmes.get(rid)
+            )
+            if real_id in built:  # a renamed repo reached under two names: the id decides
+                merged = built[real_id]
+                record = record.model_copy(
+                    update={
+                        "sources": sorted(set(merged.sources) | set(record.sources)),
+                        "clients": sorted(set(merged.clients) | set(record.clients)),
+                        "models": sorted(set(merged.models) | set(record.models)),
+                    }
+                )
+            built[real_id] = record
+
+        # Stage 7: scoped searches, then the promoted repos get looked up like the rest.
+        scoped_models, scoped_clients, promoted, scoped_info = self.scoped(built)
+        for rid in set(scoped_models) | set(scoped_clients):
+            if rid in built and built[rid].evidence == "code":
+                rec = built[rid]
+                built[rid] = rec.model_copy(
+                    update={
+                        "models": sorted(set(rec.models) | scoped_models.get(rid, set())),
+                        "clients": sorted(set(rec.clients) | scoped_clients.get(rid, set())),
+                    }
+                )
+        new_promoted = [rid for rid in promoted if rid not in built]
+        if new_promoted:
+            names = [self.mention_hits[rid].item["full_name"] for rid in new_promoted]
+            self.stage("promoted lookups", repos=len(names))
+            pfacts, _ = fetch_repos(self.client, names, log=self.log)
+            plogins = sorted(
+                {(f.data.get("owner") or {}).get("login", "") for f in pfacts.values() if f.data}
+                - {""}
+                - set(profiles),
+                key=str.lower,
+            )
+            if plogins and not self.options.skip_owners:
+                profiles.update(fetch_owners(self.client, plogins, log=self.log))
+            for rid, name in zip(new_promoted, names, strict=True):
+                pf = pfacts.get(name)
+                if pf is None or pf.data is None:
+                    continue
+                login = (pf.data.get("owner") or {}).get("login", "")
+                built[int(pf.data["id"])] = self.build_record(
+                    pf.data,
+                    None,
+                    self.previous.get(rid),
+                    profiles.get(login),
+                    None,
+                    None,
+                    extra_sources={"code:scoped", *self.mention_hits[rid].sources},
+                    extra_models=scoped_models.get(rid, set()),
+                    extra_clients=scoped_clients.get(rid, set()),
+                    promoted=True,
+                )
+        for rid in promoted:
+            if rid in built and built[rid].evidence != "code":
+                rec = built[rid]
+                built[rid] = rec.model_copy(
+                    update={
+                        "evidence": "code",
+                        "sources": sorted(set(rec.sources) | {"code:scoped"}),
+                        "models": sorted(set(rec.models) | scoped_models.get(rid, set())),
+                        "clients": sorted(set(rec.clients) | scoped_clients.get(rid, set())),
+                    }
+                )
+
+        # Records we knew before and did not look up this time (a limited run) stay as they are.
+        looked_up = set(order)
+        gone_names = {n.lower() for n in enrich_report.gone}
+        for rid, old in self.previous.items():
+            if rid in built or rid in looked_up:
+                continue
+            if old.full_name.lower() in gone_names or self.excluded(old.full_name):
+                continue
+            built[rid] = old
+
+        id_of = {wanted[rid].lower(): rid for rid in order}
+        for name in enrich_report.gone:
+            fact = facts.get(name)
+            self.gone[name.lower()] = {
+                "id": id_of.get(name.lower()),
+                "status": fact.status if fact else None,
+                "since": self.run_id,
+            }
+        for name, fact in facts.items():
+            if fact.data is not None or fact.not_modified:
+                self.gone.pop(name.lower(), None)
+
+        mentions = self.build_mentions(built)
+
+        # Stage 8: write. repos.json holds the code tier; every mention is in mentions.json.
+        repos = [r for r in built.values() if r.evidence == "code"]
+        store.save_repos(self.paths.repos, repos)
+        store.save_mentions(self.paths.mentions, mentions)
+        store.save_gone(self.paths.gone, self.gone)
+        store.save_gone(self.paths.unsearchable, self.unsearchable)
+        core_prefixes = (f"{config.API_ROOT}/repos/", f"{config.API_ROOT}/users/")
+        store.save_etags(
+            self.paths.etags,
+            {u: e for u, e in self.client.etags.items() if u.startswith(core_prefixes)},
+        )
+        snapshot = self.snapshot(repos, mentions)
+        store.write_json_atomic(self.paths.snapshots / f"{self.run_id}.json", snapshot)
+        return self.summary(
+            repos,
+            mentions,
+            snapshot,
+            enrich_report,
+            partial,
+            scoped_info,
+            len(promoted),
+            len(profiles),
+        )
+
+    def build_mentions(self, built: dict[int, Repo]) -> list[Mention]:
+        code_ids = {rid for rid, r in built.items() if r.evidence == "code"}
+        out: dict[int, Mention] = {}
+        for rid, mh in self.mention_hits.items():
+            if rid in code_ids:
+                continue
+            item = mh.item
+            if self.excluded(item["full_name"]):
+                continue
+            owner = item.get("owner") or {}
+            old = self.previous_mentions.get(rid)
+            out[rid] = Mention(
+                id=rid,
+                full_name=item["full_name"],
+                html_url=item.get("html_url") or f"https://github.com/{item['full_name']}",
+                description=_clean(item.get("description")),
+                stars=int(item.get("stargazers_count") or 0),
+                language=item.get("language"),
+                topics=list(item.get("topics") or []),
+                created_at=item["created_at"],
+                pushed_at=item.get("pushed_at"),
+                archived=bool(item.get("archived")),
+                owner_login=owner.get("login", ""),
+                owner_type=owner.get("type", "User"),
+                owner_avatar_url=owner.get("avatar_url", ""),
+                owner_is_fal=is_fal_owner(owner.get("login", "")),
+                sources=sorted(mh.sources | (set(old.sources) if old else set())),
+                first_seen=old.first_seen if old else self.run_id,
+                last_seen=self.run_id,
+            )
+        for rid, rec in built.items():
+            if rec.evidence == "mention" and rid not in out:
+                out[rid] = Mention(
+                    id=rid,
+                    full_name=rec.full_name,
+                    html_url=rec.html_url,
+                    description=rec.description,
+                    stars=rec.stars,
+                    language=rec.language,
+                    topics=rec.topics,
+                    created_at=rec.created_at,
+                    pushed_at=rec.pushed_at,
+                    archived=rec.archived,
+                    owner_login=rec.owner.login,
+                    owner_type=rec.owner.type,
+                    owner_avatar_url=rec.owner.avatar_url,
+                    owner_is_fal=rec.owner_is_fal,
+                    sources=rec.sources,
+                    first_seen=rec.first_seen,
+                    last_seen=rec.last_seen,
+                )
+        return list(out.values())
+
+    def snapshot(self, repos: list[Repo], mentions: list[Mention]) -> dict[str, Any]:
+        headline = [r for r in repos if is_headline(r)]
+        family_files = {
+            r.id.removeprefix("model-"): {"files": r.total_count, "sampled": r.sampled}
+            for r in self.reports
+            if r.id.startswith("model-")
         }
-    for name, fact in facts.items():
-        if fact.data is not None or fact.not_modified:
-            gone.pop(name.lower(), None)
+        family_repos = Counter(f for r in headline for f in r.models)
+        families = {}
+        for fam in self.index.families:
+            files = family_files.get(fam.id)
+            if files is None and fam.id not in family_repos:
+                continue
+            families[fam.id] = {
+                "repos": family_repos.get(fam.id, 0),
+                "files": files["files"] if files else None,
+                "files_sampled": files["sampled"] if files else None,
+            }
+        return {
+            "date": self.run_id,
+            "headline": len(headline),
+            "builders": len({r.owner.login.lower() for r in headline}),
+            "notable": sum(1 for r in headline if r.notable),
+            "active": sum(1 for r in headline if r.active),
+            "mentions": len(mentions),
+            "from_fal": sum(1 for r in repos if r.evidence == "code" and r.owner_is_fal),
+            "clients": dict(sorted(Counter(c for r in headline for c in r.clients).items())),
+            "kinds": dict(sorted(Counter(r.kind for r in headline).items())),
+            "stacks": dict(sorted(Counter(s for r in headline for s in r.stack).items())),
+            "languages": dict(Counter(r.language or "none" for r in headline).most_common(15)),
+            "families": dict(sorted(families.items())),
+        }
 
-    repos = list(built.values())
-    store.save_repos(paths.repos, repos)
-    store.save_gone(paths.gone, gone)
-    core_prefixes = (f"{config.API_ROOT}/repos/", f"{config.API_ROOT}/users/")
-    store.save_etags(
-        paths.etags, {u: e for u, e in client.etags.items() if u.startswith(core_prefixes)}
-    )
+    def summary(
+        self,
+        repos,
+        mentions,
+        snapshot,
+        enrich_report,
+        partial,
+        scoped_info,
+        promoted_count,
+        owners_looked_up,
+    ) -> dict[str, Any]:
+        code = [r for r in repos if r.evidence == "code"]
+        headline = [r for r in code if is_headline(r)]
+        totals = {
+            "headline": len(headline),
+            "headline_builders": len({r.owner.login.lower() for r in headline}),
+            "headline_notable": sum(1 for r in headline if r.notable),
+            "headline_active": sum(1 for r in headline if r.active),
+            "code_tier": len(code),
+            "code_tier_forks": sum(1 for r in code if r.fork),
+            "fal_template_copies": sum(1 for r in code if _from_fal_template(r)),
+            "from_fal": sum(1 for r in code if r.owner_is_fal),
+            "mentions": len(mentions),
+            "promoted": promoted_count,
+            "repos_in_file": len(repos),
+            "found_this_run": len(self.hits),
+            "gone": len(enrich_report.gone),
+            "gone_skipped_stale_hits": self.stats.get("gone_skipped_stale_hits", 0),
+            "renamed": len(enrich_report.renamed),
+            "model_families_with_repos": sum(
+                1 for v in snapshot["families"].values() if v["repos"]
+            ),
+        }
+        coverage = [
+            {
+                "id": r.id,
+                "kind": r.kind,
+                "q": r.q,
+                "total_count": r.total_count,
+                "sum_of_slice_totals": r.sum_of_slice_totals,
+                "slices": len(r.slices),
+                "truncated_slices": r.truncated_slices,
+                "sampled": r.sampled,
+                "incomplete": r.incomplete,
+                "files": r.files,
+                "literal_match": r.verified_files,
+                "dropped": r.unverified_files,
+                "in_docs": r.doc_files,
+                "repos": r.counted_repos,
+                "requests": r.requests,
+            }
+            for r in self.reports
+        ]
+        return {
+            "run_id": self.run_id,
+            "collector": __version__,
+            "partial": partial,
+            "resumed": self.options.resume,
+            "offline": self.options.offline,
+            "totals": totals,
+            "coverage": coverage,
+            "queries": [r.to_dict() for r in self.reports],
+            "enrichment": {
+                "requested": enrich_report.requested,
+                "ok": enrich_report.ok,
+                "not_modified": enrich_report.not_modified,
+                "gone": sorted(enrich_report.gone, key=str.lower),
+                "renamed": dict(sorted(enrich_report.renamed.items())),
+                "owners_looked_up": owners_looked_up,
+                "manifests_requested": self.stats.get("manifests_requested", 0),
+                "manifests_read": self.stats.get("manifests_read", 0),
+                "readmes_requested": self.stats.get("readmes_requested", 0),
+            },
+            "scoped": scoped_info,
+            "unknown_model_ids": dict(self.unknown_ids.most_common(MAX_UNKNOWN_IDS_IN_SUMMARY)),
+            "requests": {k: dict(v) for k, v in sorted(self.client.stats.items())},
+            "api_facts": API_FACTS,
+            "notes": [
+                "headline: code tier, not a fork, not owned by fal, not a copy of a fal template.",
+                "models: families seen in code search fragments, a lower bound.",
+                "model families: file counts are GitHub's estimate for the unsliced query; "
+                f"repo mapping sampled at {MODEL_QUERIES[0].max_pages if MODEL_QUERIES else 0} "
+                "pages per family.",
+                f"scoped searches: notable repos and mention repos with 20+ stars, "
+                f"at most {SCOPED_CAP} per run, first page only.",
+            ],
+        }
 
-    code = [r for r in repos if r.evidence == "code"]
-    headline = [r for r in code if is_headline(r)]
-    totals = {
-        "headline": len(headline),
-        "repos": len(repos),
-        "code_tier": len(code),
-        "mention_tier": len(repos) - len(code),
-        "code_tier_non_fork": sum(1 for r in code if not r.fork),
-        "code_tier_notable": sum(1 for r in code if r.notable),
-        "code_tier_active": sum(1 for r in code if r.active),
-        "owners": len({r.owner.login.lower() for r in code}),
-        "headline_owners": len({r.owner.login.lower() for r in headline}),
-        "fal_template_copies": sum(1 for r in code if _from_fal_template(r)),
-        "found_this_run": len(hits),
-        "gone": len(enrich_report.gone),
-        "gone_skipped_stale_hits": stale_hits,
-        "renamed": len(enrich_report.renamed),
-    }
-    return {
-        "run_id": run_id,
-        "collector": __version__,
-        "partial": partial,
-        "resumed": options.resume,
-        "offline": options.offline,
-        "queries": [r.to_dict() for r in reports],
-        "totals": totals,
-        "kinds": dict(sorted(Counter(r.kind for r in code).items())),
-        "clients": dict(sorted(Counter(c for r in code for c in r.clients).items())),
-        "enrichment": {
-            "requested": enrich_report.requested,
-            "ok": enrich_report.ok,
-            "not_modified": enrich_report.not_modified,
-            "gone": sorted(enrich_report.gone, key=str.lower),
-            "renamed": dict(sorted(enrich_report.renamed.items())),
-            "owners_looked_up": len(profiles),
-        },
-        "unknown_model_ids": dict(unknown_ids.most_common(MAX_UNKNOWN_IDS_IN_SUMMARY)),
-        "requests": {k: dict(v) for k, v in sorted(client.stats.items())},
-        "api_facts": API_FACTS,
-        "notes": [
-            "headline: code tier, not a fork, not generated from one of fal's own templates.",
-            "notable is a lower bound until the README lookup exists (Phase 1).",
-            "models are those seen in code search fragments: models seen in code, at least.",
-        ],
-    }
+
+def _filename_of(q: str) -> str | None:
+    """The filename: qualifier of a query, if it has one."""
+    for part in q.split():
+        if part.startswith("filename:"):
+            return part.split(":", 1)[1]
+    return None
+
+
+def _neg_date(value: str) -> str:
+    """Sort key that puts later ISO dates first."""
+    return "".join(chr(0x10FFFF - ord(c)) for c in value)

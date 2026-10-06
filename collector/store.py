@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .schema import Exclusions, Repo
+from .schema import Exclusions, Mention, Repo
 
 
 def write_json_atomic(path: Path, payload: Any, *, indent: int | None = 1) -> None:
@@ -39,6 +39,15 @@ def load_repos(path: Path) -> dict[int, Repo]:
 def save_repos(path: Path, repos: list[Repo]) -> None:
     ordered = sorted(repos, key=lambda r: (r.full_name.lower(), r.id))
     write_json_atomic(path, [r.model_dump(mode="json") for r in ordered])
+
+
+def load_mentions(path: Path) -> dict[int, Mention]:
+    return {m.id: m for m in (Mention.model_validate(x) for x in read_json(path, []))}
+
+
+def save_mentions(path: Path, mentions: list[Mention]) -> None:
+    ordered = sorted(mentions, key=lambda m: (-m.stars, m.full_name.lower(), m.id))
+    write_json_atomic(path, [m.model_dump(mode="json") for m in ordered], indent=None)
 
 
 def load_exclusions(path: Path) -> Exclusions:

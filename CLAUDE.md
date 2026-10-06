@@ -46,8 +46,10 @@ Footer: "Unofficial. Not affiliated with fal. Data: public GitHub, updated weekl
 Each repo has `evidence: "code" | "mention"`.
 **Code**: a fal client or integration package in a manifest, an import, a `queue.fal.run` or `fal.run` call, or a fal endpoint ID in a source file.
 **Mention**: README, description or topic hits only.
-The headline, the default list and the digest use the code tier, **non-forks only**; forks of fal's own templates never count toward the headline.
-Mentions have their own count and the toggle.
+The headline, the default list and the digest use the code tier, **non-forks only**; forks and copies of fal's own templates never count toward the headline.
+Repos owned by fal itself (owners `fal-ai` and `fal-ai-community`) carry `owner_is_fal` and stay out of the headline, the default list, the digest and the builders page; About shows them under a small "From fal" note, and the list has an "Include fal's own repos" toggle.
+Templates built by other people count in the headline but never in the digest's notable set.
+Mentions have their own count and the toggle. `data/repos.json` holds the code tier; `data/mentions.json` holds the mention tier (slim records straight from repository search, no extra lookups).
 
 Integration packages count as code evidence with client label `integration`: `@ai-sdk/fal` (Vercel AI SDK), `@tanstack/ai-fal`, `livekit-plugins-fal`, LiteLLM's `fal_ai/` model route, fal's n8n node `@fal-ai/n8n-nodes-fal`. About lists them in one line.
 
@@ -90,9 +92,10 @@ Wording on the site: "models seen in code, at least".
 - `clients`: js, python, swift, kotlin, dart, http, integration.
 - `models`: families from endpoint IDs in text-match fragments.
 - `kind`: template, fork (fork and under 25 stars), app, library, bot, plugin, research.
-- `stack`: next, react, vue, svelte, remix, expo, flutter, fastapi, django, flask, gradio, streamlit, comfyui, n8n.
+- `stack`: next, react, vue, svelte, remix, expo, flutter, fastapi, django, flask, gradio, streamlit, comfyui, n8n, from topics and from one manifest per repo (the preferred manifest among its code-search hits: package.json, then pyproject.toml, requirements.txt, pubspec.yaml; shallowest path first). The same manifest decides `bot` (discord.js, telegraf, python-telegram-bot, slack bolt and similar) and `library` (a package with main or exports, not private, no app framework; or a pyproject package with no entry point and no web framework).
 - `active`: pushed in the last 90 days.
-- `notable`: not a fork, not a template, has a description, and 3 or more stars or pushed in the last 30 days with a README over 500 bytes.
+- `notable`: not a fork, not a template, has a description, and 3 or more stars or pushed in the last 30 days with a README over 500 bytes. The README size is looked up only for repos where it decides the answer.
+- Scoped searches also record which clients a repo shows; a manifest literal counts only inside its own file name (Dart's `fal_client` only in pubspec.yaml).
 
 ### 3.6 Snapshots, deltas, "this week"
 

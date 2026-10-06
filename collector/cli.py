@@ -35,6 +35,15 @@ def run(
     skip_owners: Annotated[
         bool, typer.Option("--skip-owners", help="Do not look up owner profiles.")
     ] = False,
+    skip_manifests: Annotated[
+        bool, typer.Option("--skip-manifests", help="Do not read manifests (kind, stack).")
+    ] = False,
+    skip_readmes: Annotated[
+        bool, typer.Option("--skip-readmes", help="Do not look up README sizes.")
+    ] = False,
+    skip_scoped: Annotated[
+        bool, typer.Option("--skip-scoped", help="Do not run scoped per-repo searches.")
+    ] = False,
     limit_repos: Annotated[
         int | None,
         typer.Option("--limit-repos", min=1, help="Look up at most this many repositories."),
@@ -46,6 +55,9 @@ def run(
         resume=resume,
         offline=offline,
         skip_owners=skip_owners,
+        skip_manifests=skip_manifests,
+        skip_readmes=skip_readmes,
+        skip_scoped=skip_scoped,
         limit_repos=limit_repos,
     )
     try:
@@ -106,33 +118,45 @@ def report(
     if not repos:
         typer.echo("data/repos.json is empty. Run the collector first.")
         raise typer.Exit(1)
-    code = [r for r in repos if r.evidence == "code"]
+    from .pipeline import is_headline
+
+    head = [r for r in repos if is_headline(r)]
     typer.echo(f"repositories in data/repos.json: {len(repos)}")
-    typer.echo(f"  with fal in the code: {len(code)}")
-    typer.echo(f"  of those, not forks: {sum(1 for r in code if not r.fork)}")
-    typer.echo(f"  builders (unique owners): {len({r.owner.login.lower() for r in code})}")
+    typer.echo(f"  headline (fal in the code, not a fork, not fal's own): {len(head)}")
+    typer.echo(f"  builders (unique owners): {len({r.owner.login.lower() for r in head})}")
+    typer.echo(
+        f"  from fal (owner fal-ai or fal-ai-community): {sum(r.owner_is_fal for r in repos)}"
+    )
     typer.echo("")
-    ranked = sorted((r for r in code if not r.fork), key=lambda r: (-r.stars, r.full_name.lower()))
+    ranked = sorted(head, key=lambda r: (-r.stars, r.full_name.lower()))
     for r in ranked[:top]:
         text = (r.description or "").replace("\n", " ")
         typer.echo(f"{r.stars:>7}  {r.full_name}  [{r.kind}]  {text[:90]}")
 
 
 def _print_summary(summary: dict) -> None:
-    totals = summary["totals"]
+    t = summary["totals"]
     typer.echo(f"run {summary['run_id']} finished in {summary['seconds']} s")
-    for q in summary["queries"]:
-        coverage = ""
-        if q["sliced"]:
-            coverage = f", slice totals add up to {q['sum_of_slice_totals']}"
-        flags = "".join(f", {name}" for name in ("sampled", "incomplete") if q[name])
-        typer.echo(
-            f"  {q['id']}: total_count {q['total_count']}{coverage}, files {q['files']}, "
-            f"repositories {q['repos']}, requests {q['requests']}{flags}"
-        )
+    typer.echo("")
     typer.echo(
-        f"repositories with fal in the code: {totals['code_tier']} "
-        f"({totals['code_tier_non_fork']} not forks), builders {totals['owners']}"
+        f"{'query':28} {'total':>7} {'slices':>6} {'files':>6} {'literal':>7} "
+        f"{'dropped':>7} {'docs':>5} {'repos':>6}"
+    )
+    for c in summary["coverage"]:
+        flag = " sampled" if c["sampled"] else (" truncated" if c["truncated_slices"] else "")
+        typer.echo(
+            f"{c['id'][:28]:28} {c['total_count']:>7} {c['slices']:>6} {c['files']:>6} "
+            f"{c['literal_match']:>7} {c['dropped']:>7} {c['in_docs']:>5} {c['repos']:>6}{flag}"
+        )
+    typer.echo("")
+    typer.echo(
+        f"headline (fal in the code, not a fork, not fal's own): {t['headline']} repos, "
+        f"{t['headline_builders']} builders, {t['headline_notable']} notable, "
+        f"{t['headline_active']} active"
+    )
+    typer.echo(
+        f"also: forks {t['code_tier_forks']}, fal template copies {t['fal_template_copies']}, "
+        f"from fal {t['from_fal']}, mentions {t['mentions']}, promoted {t['promoted']}"
     )
     if summary["partial"]:
         typer.echo(

@@ -76,3 +76,32 @@ def fetch_owners(
         if n % PROGRESS_EVERY == 0:
             log(f"  owners {n}/{len(logins)}")
     return out
+
+
+def fetch_file(client: GitHubClient, full_name: str, path: str) -> str | None:
+    """Text of one file from the contents API, or None (missing, too large, not text)."""
+    import base64
+    import urllib.parse
+
+    quoted = urllib.parse.quote(path, safe="/")
+    resp = client.get(f"/repos/{full_name}/contents/{quoted}")
+    data = resp.data
+    if resp.status != 200 or not isinstance(data, dict) or data.get("type") != "file":
+        return None
+    if data.get("encoding") != "base64" or not data.get("content"):
+        return None
+    try:
+        return base64.b64decode(data["content"]).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+
+
+def fetch_readme_size(client: GitHubClient, full_name: str) -> int | None:
+    """Size in bytes of a repository's README, 0 when it has none, None when unknown."""
+    resp = client.get(f"/repos/{full_name}/readme")
+    if resp.status == 404:
+        return 0
+    if resp.status == 200 and isinstance(resp.data, dict):
+        size = resp.data.get("size")
+        return int(size) if isinstance(size, int) else None
+    return None

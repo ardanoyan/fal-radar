@@ -1,7 +1,7 @@
-"""Heuristic labels. No LLM. Phase 0 covers what repository metadata alone can tell.
+"""Heuristic labels. No LLM.
 
-Still to come in Phase 1 (they need manifests or a README lookup): the library and bot
-kinds, stack from manifests, and the README half of the notable rule.
+Inputs: repository metadata, one manifest per repo when a manifest hit named its path
+(see manifests.py), and the README size for repos that could be notable by a recent push.
 """
 
 from __future__ import annotations
@@ -62,8 +62,16 @@ def days_since(value: str | None, today: dt.date) -> int | None:
 
 
 def kind_of(
-    *, name: str, description: str | None, fork: bool, is_template: bool, stars: int
+    *,
+    name: str,
+    description: str | None,
+    fork: bool,
+    is_template: bool,
+    stars: int,
+    bot: bool = False,
+    library: bool = False,
 ) -> str:
+    """One label per repo. bot and library come from its manifest, when one was read."""
     text_name = name.lower()
     text_all = f"{text_name} {(description or '').lower()}"
     if is_template or _has_word(text_all, TEMPLATE_WORDS):
@@ -72,9 +80,31 @@ def kind_of(
         return "fork"
     if _has_word(text_all, PLUGIN_WORDS):
         return "plugin"
+    if bot:
+        return "bot"
+    if library:
+        return "library"
     if _has_word((description or "").lower(), RESEARCH_WORDS):
         return "research"
     return "app"
+
+
+def needs_readme(
+    *,
+    fork: bool,
+    kind: str,
+    description: str | None,
+    stars: int,
+    pushed_at: str | None,
+    today: dt.date,
+) -> bool:
+    """Only repos that could be notable by a recent push need their README size."""
+    if fork or kind == "template" or not (description or "").strip():
+        return False
+    if stars >= NOTABLE_MIN_STARS:
+        return False
+    age = days_since(pushed_at, today)
+    return age is not None and age <= NOTABLE_RECENT_DAYS
 
 
 def is_active(pushed_at: str | None, today: dt.date) -> bool:
@@ -105,6 +135,10 @@ def is_notable(
     age = days_since(pushed_at, today)
     recent = age is not None and age <= NOTABLE_RECENT_DAYS
     return recent and readme_bytes is not None and readme_bytes > NOTABLE_MIN_README_BYTES
+
+
+def stack_of(topics: list[str], manifest_stack: list[str] | None = None) -> list[str]:
+    return sorted(set(stack_from_topics(topics)) | set(manifest_stack or []))
 
 
 def stack_from_topics(topics: list[str]) -> list[str]:

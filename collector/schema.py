@@ -50,6 +50,9 @@ class Repo(BaseModel):
     fork_source: str | None = None
     template_source: str | None = None
     owner: Owner
+    # Owned by fal itself (fal-ai, fal-ai-community): kept out of the headline, the default
+    # list, the digest and the builders page.
+    owner_is_fal: bool = False
     # "code": fal shows up in the code. "mention": README, description or topics only.
     evidence: Literal["code", "mention"]
     sources: list[str]
@@ -60,9 +63,38 @@ class Repo(BaseModel):
     stack: list[str]
     active: bool
     notable: bool
+    # README size in bytes, looked up only when it decides "notable"; None when not looked up.
+    readme_bytes: int | None = None
     first_seen: str
     last_seen: str
     stars_history: list[StarsPoint]
+
+
+class Mention(BaseModel):
+    """A repo whose README, description, name or topics mention fal, with no fal in its code.
+
+    Kept slim: these come straight from repository search results, without extra lookups.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    full_name: str
+    html_url: str
+    description: str | None
+    stars: int
+    language: str | None
+    topics: list[str]
+    created_at: str
+    pushed_at: str | None
+    archived: bool
+    owner_login: str
+    owner_type: str
+    owner_avatar_url: str
+    owner_is_fal: bool = False
+    sources: list[str]
+    first_seen: str
+    last_seen: str
 
 
 class Exclusions(BaseModel):

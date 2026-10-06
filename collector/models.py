@@ -146,3 +146,50 @@ def load_families(path: Path = MODELS_YAML) -> tuple[dict, FamilyIndex]:
 @lru_cache(maxsize=1)
 def default_index() -> FamilyIndex:
     return load_families()[1]
+
+
+ENDPOINTS_TSV = Path(__file__).with_name("fal_endpoints.tsv")
+
+
+@lru_cache(maxsize=1)
+def known_endpoints() -> frozenset[str]:
+    """Every endpoint ID in fal_endpoints.tsv (fal's catalogue on the day it was read)."""
+    ids = set()
+    for line in ENDPOINTS_TSV.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#") or line.startswith("id\t"):
+            continue
+        ids.add(line.split("\t", 1)[0])
+    return frozenset(ids)
+
+
+_ID_CHARS = re.compile(r"[a-z0-9._/-]+")
+
+
+def extract_partner_ids(text: str, known: frozenset[str] | None = None) -> list[str]:
+    """Endpoint IDs outside the fal-ai namespace, kept only on an exact catalogue match.
+
+    "bytedance/seedance-2.0/text-to-video" counts; "openai/gpt-4o" does not, because it is
+    not one of fal's endpoints. Callers use this only for repos that already show fal in code.
+    """
+    known = known if known is not None else known_endpoints()
+    namespaces = {e.split("/", 1)[0] for e in known} - {"fal-ai"}
+    lowered = text.lower()
+    out: list[str] = []
+    for ns in namespaces:
+        start = 0
+        needle = f"{ns}/"
+        while (i := lowered.find(needle, start)) != -1:
+            start = i + 1
+            if i > 0 and (lowered[i - 1].isalnum() or lowered[i - 1] in "-_@./"):
+                continue
+            m = _ID_CHARS.match(lowered, i)
+            candidate = _URL_SUFFIX.sub("", m.group(0).rstrip(_TRAILING)) if m else ""
+            # Longest prefix (by whole path segments) that is a real endpoint.
+            parts = candidate.split("/")
+            for n in range(len(parts), 1, -1):
+                prefix = "/".join(parts[:n])
+                if prefix in known:
+                    if prefix not in out:
+                        out.append(prefix)
+                    break
+    return out

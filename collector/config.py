@@ -37,6 +37,18 @@ class Paths:
         return self.data / "etags.json"
 
     @property
+    def mentions(self) -> Path:
+        return self.data / "mentions.json"
+
+    @property
+    def unsearchable(self) -> Path:
+        return self.data / "unsearchable.json"
+
+    @property
+    def snapshots(self) -> Path:
+        return self.data / "snapshots"
+
+    @property
     def gone(self) -> Path:
         return self.data / "gone.json"
 
